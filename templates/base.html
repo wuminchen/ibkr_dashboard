@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}IBKR 报告{% endblock %}</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <style>
+        :root {
+            --primary-color: #005A9C;
+            --secondary-color: #3D9970;
+            --light-gray: #f8f9fa;
+            --border-color: #dee2e6;
+            --positive-color: #D8000C; /* 盈利用红色（符合亚洲习惯） */
+            --negative-color: #2E7D32; /* 亏损用绿色 */
+            --highlight-color: #FFF3CD;
+        }
+
+        body {
+            font-family: 'Lato', 'Noto Sans SC', sans-serif;
+            background-color: var(--light-gray);
+            color: #343a40;
+            margin: 0;
+            padding: 24px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            color: var(--primary-color);
+            font-weight: 700;
+        }
+        .header .timestamp {
+            color: #6c757d;
+        }
+
+        .account-card {
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            margin-bottom: 32px;
+            padding: 24px 32px;
+            overflow: hidden;
+        }
+
+        .account-card h2 {
+            font-size: 1.75rem;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 12px;
+            margin-top: 0;
+            margin-bottom: 24px;
+        }
+        .account-card h2 .fa-wallet {
+            margin-right: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            text-align: left;
+            vertical-align: middle;
+        }
+        thead th {
+            color: var(--secondary-color);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 0.9em;
+            background-color: #f2f2f2;
+            border-bottom-width: 2px;
+        }
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        tbody tr:hover {
+            background-color: #f5f5f5;
+        }
+
+        .updating {
+            transition: background-color 0.5s ease-out;
+        }
+        .pnl-positive, .pnl-positive .fa-arrow-up {
+            color: var(--positive-color);
+            font-weight: 700;
+        }
+        .pnl-negative, .pnl-negative .fa-arrow-down {
+            color: var(--negative-color);
+            font-weight: 700;
+        }
+        .pnl-icon {
+            margin-right: 6px;
+            width: 12px; /* 保持图标对齐 */
+        }
+    </style>
+    
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{# --- 定义一个可复用的宏，用于渲染单个账户的卡片 --- #}
+{% macro render_account_card(account_id, positions) %}
+<div class="account-card">
+    <h2><i class="fas fa-wallet"></i> 账户: {{ account_id }}</h2>
+    {% if positions %}
+        <table class="positions-table">
+            <thead>
+                <tr>
+                    <th>产品</th>
+                    <th>数量</th>
+                    <th>平均成本</th>
+                    <th>当前市价</th>
+                    <th>总市值</th>
+                    <th>未实现盈亏</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in positions %}
+                    <tr data-conid="{{ pos.conid }}" data-position="{{ pos.position }}" data-avgcost="{{ pos.avgCost }}">
+                        <td><strong>{{ pos.contractDesc }}</strong></td>
+                        <td>{{ pos.position }}</td>
+                        <td>{{ "%.2f"|format(pos.avgCost) }}</td>
+                        <td id="price-{{ pos.conid }}" class="updating">--.--</td>
+                        <td id="marketValue-{{ pos.conid }}" class="updating">--.--</td>
+                        <td id="pnl-{{ pos.conid }}" class="updating">--.--</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>此账户当前没有持仓。</p>
+    {% endif %}
+</div>
+{% endmacro %}
+
+
+{# --- 页面主体内容 --- #}
+{% block title %}IBKR 实时持仓仪表盘{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1><i class="fas fa-chart-line"></i> IBKR 实时持仓仪表盘</h1>
+    <p class="timestamp">上次更新: <span id="last-updated">--:--:--</span></p>
+</div>
+
+{# --- 使用宏来循环渲染每个账户 --- #}
+{% for account_id, positions in all_positions.items() %}
+    {{ render_account_card(account_id, positions) }}
+{% endfor %}
+{% endblock %}
+
+
+{# --- 页面专属的 JavaScript --- #}
+{% block scripts %}
+<script>
+    function updatePrices() {
+        const allConids = Array.from(document.querySelectorAll('tr[data-conid]')).map(row => row.dataset.conid);
+        if (allConids.length === 0) return;
+
+        fetch(`/api/prices?conids=${allConids.join(',')}`)
+            .then(response => response.json())
+            .then(priceData => {
+                document.querySelectorAll('tr[data-conid]').forEach(row => {
+                    const conid = row.dataset.conid;
+                    const latestPrice = parseFloat(priceData[conid]);
+
+                    if (isNaN(latestPrice)) return;
+
+                    const position = parseFloat(row.dataset.position);
+                    const avgCost = parseFloat(row.dataset.avgcost);
+                    const marketValue = latestPrice * position;
+                    const pnl = (latestPrice - avgCost) * position;
+
+                    const priceCell = document.getElementById(`price-${conid}`);
+                    const marketValueCell = document.getElementById(`marketValue-${conid}`);
+                    const pnlCell = document.getElementById(`pnl-${conid}`);
+                    
+                    priceCell.textContent = latestPrice.toFixed(2);
+                    marketValueCell.textContent = marketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    
+                    let pnlIcon = '';
+                    if (pnl > 0) {
+                        pnlCell.className = 'updating pnl-positive';
+                        pnlIcon = '<i class="fas fa-arrow-up pnl-icon"></i>';
+                    } else if (pnl < 0) {
+                        pnlCell.className = 'updating pnl-negative';
+                        pnlIcon = '<i class="fas fa-arrow-down pnl-icon"></i>';
+                    } else {
+                        pnlCell.className = 'updating';
+                        pnlIcon = '<i class="fas fa-minus pnl-icon"></i>';
+                    }
+                    pnlCell.innerHTML = pnlIcon + pnl.toFixed(2);
+
+                    priceCell.style.backgroundColor = 'var(--highlight-color)';
+                    setTimeout(() => { priceCell.style.backgroundColor = ''; }, 1200);
+                });
+                
+                document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+            })
+            .catch(error => console.error('更新价格失败:', error));
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updatePrices();
+        setInterval(updatePrices, 15000); // 每15秒刷新一次
+    });
+</script>
+{% endblock %}
