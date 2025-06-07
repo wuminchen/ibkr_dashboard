@@ -26,10 +26,11 @@
             color: #343a40;
             margin: 0;
             padding: 24px;
+            font-size: 14px;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: auto;
         }
 
@@ -65,24 +66,53 @@
         .account-card h2 .fa-wallet {
             margin-right: 12px;
         }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 28px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .summary-item {
+            background-color: #fdfdfd;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid var(--secondary-color);
+        }
+        .summary-label {
+            display: block;
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-bottom: 6px;
+        }
+        .summary-value {
+            font-size: 1.25em;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
 
         table {
             width: 100%;
             border-collapse: collapse;
         }
         th, td {
-            padding: 16px;
+            padding: 14px 10px;
             border-bottom: 1px solid var(--border-color);
             text-align: left;
             vertical-align: middle;
+            white-space: nowrap;
         }
         thead th {
             color: var(--secondary-color);
             font-weight: 700;
             text-transform: uppercase;
-            font-size: 0.9em;
+            font-size: 0.85em;
             background-color: #f2f2f2;
             border-bottom-width: 2px;
+            position: sticky;
+            top: 0;
         }
         tbody tr:last-child td {
             border-bottom: none;
@@ -94,17 +124,41 @@
         .updating {
             transition: background-color 0.5s ease-out;
         }
-        .pnl-positive, .pnl-positive .fa-arrow-up {
-            color: var(--positive-color);
+        .pnl-positive, .pnl-positive .fa-arrow-up, .summary-value.pnl-positive {
+            color: var(--positive-color) !important;
             font-weight: 700;
         }
-        .pnl-negative, .pnl-negative .fa-arrow-down {
-            color: var(--negative-color);
+        .pnl-negative, .pnl-negative .fa-arrow-down, .summary-value.pnl-negative {
+            color: var(--negative-color) !important;
             font-weight: 700;
         }
         .pnl-icon {
             margin-right: 6px;
             width: 12px; /* 保持图标对齐 */
+        }
+
+        .historical-pnl-section {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-color);
+        }
+        .timeframe-selector {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 8px;
+        }
+        .btn-timeframe {
+            background-color: #e9ecef;
+            border: 1px solid #ced4da;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+        }
+        .btn-timeframe:hover, .btn-timeframe.active {
+            background-color: var(--secondary-color);
+            color: white;
+            border-color: var(--secondary-color);
         }
     </style>
     
@@ -115,6 +169,7 @@
         {% block content %}{% endblock %}
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
