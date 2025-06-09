@@ -1,87 +1,32 @@
 {% extends 'base.html' %}
 
-{# --- 定义一个可复用的宏，用于渲染单个账户的卡片 --- #}
+{# --- 宏定义：渲染【单个】账户卡片 --- #}
 {% macro render_account_card(account_id, data) %}
-<div class="account-card" id="account-{{ account_id }}" data-netliq="{{ data.summary.net_liquidation }}">
+<div class="account-card" style="display: none;" data-account-id="{{ account_id }}">
     <h2><i class="fas fa-wallet"></i> 账户: {{ account_id }}</h2>
-    
     <div class="summary-grid">
-        <div class="summary-item">
-            <span class="summary-label">净清算价值</span>
-            <span class="summary-value">{{ "%.2f"|format(data.summary.net_liquidation) }} {{ data.summary.currency }}</span>
-        </div>
-        <div class="summary-item">
-            <span class="summary-label">当日未实现盈亏</span>
-            <span id="daily-unrealized-pnl-{{ account_id }}" class="summary-value">--.--</span>
-        </div>
-        <div class="summary-item">
-            <span class="summary-label">今日已实现盈亏</span>
-            <span class="summary-value {% if data.summary.realized_pnl > 0 %}pnl-positive{% elif data.summary.realized_pnl < 0 %}pnl-negative{% endif %}">
-                {{ "%.2f"|format(data.summary.realized_pnl) }}
-            </span>
-        </div>
-        <div class="summary-item">
-            <span class="summary-label">现金余额</span>
-            <span class="summary-value">{{ "%.2f"|format(data.summary.cash) }}</span>
-        </div>
-        <div class="summary-item">
-            <span class="summary-label">购买力</span>
-            <span class="summary-value">{{ "%.2f"|format(data.summary.buying_power) }}</span>
-        </div>
+        <div class="summary-item"><span class="summary-label">净清算价值</span><span class="summary-value">{{ "%.2f"|format(data.summary.net_liquidation) }} {{ data.summary.currency }}</span></div>
+        <div class="summary-item"><span class="summary-label">当日未实现盈亏</span><span id="daily-unrealized-pnl-{{ account_id }}" class="summary-value">--.--</span></div>
+        <div class="summary-item"><span class="summary-label">今日已实现盈亏</span><span class="summary-value {% if data.summary.realized_pnl > 0 %}pnl-positive{% elif data.summary.realized_pnl < 0 %}pnl-negative{% endif %}">{{ "%.2f"|format(data.summary.realized_pnl) }}</span></div>
+        <div class="summary-item"><span class="summary-label">现金余额</span><span class="summary-value">{{ "%.2f"|format(data.summary.cash) }}</span></div>
+        <div class="summary-item"><span class="summary-label">购买力</span><span class="summary-value">{{ "%.2f"|format(data.summary.buying_power) }}</span></div>
     </div>
-
     {% if data.positions %}
         <div style="overflow-x: auto;">
             <table class="positions-table">
                 <thead>
-                    <tr>
-                        <th>产品</th>
-                        <th>资产类别</th>
-                        <th>数量</th>
-                        <th>平均成本</th>
-                        <th>持仓成本</th>
-                        <th>当前市价</th>
-                        <th>总市值</th>
-                        <th>未实现盈亏</th>
-                        <th>盈亏 (%)</th>
-                        <th>当日盈亏</th>
-                        <th>货币</th>
-                    </tr>
+                    <tr><th>产品</th><th>资产类别</th><th>数量</th><th>平均成本</th><th>持仓成本</th><th>当前市价</th><th>总市值</th><th>未实现盈亏</th><th>盈亏 (%)</th><th>当日盈亏</th><th>货币</th></tr>
                 </thead>
                 <tbody>
                     {% for pos in data.positions %}
                         <tr data-conid="{{ pos.conid }}" data-position="{{ pos.position }}" data-avgcost="{{ pos.avgCost }}" data-costbasis="{{ pos.costBasis }}">
-                            <td><strong>{{ pos.contractDesc }}</strong></td>
-                            <td>{{ pos.assetClass }}</td>
-                            <td>{{ pos.position }}</td>
-                            <td>{{ "%.2f"|format(pos.avgCost) }}</td>
-                            <td>{{ "%.2f"|format(pos.costBasis) }}</td>
-                            <td id="price-{{ pos.conid }}" class="updating">--.--</td>
-                            <td id="marketValue-{{ pos.conid }}" class="updating">--.--</td>
-                            <td id="pnl-{{ pos.conid }}" class="updating">--.--</td>
-                            <td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td>
-                            <td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td>
-                            <td>{{ pos.currency }}</td>
+                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td><td>{{ pos.currency }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-    {% else %}
-        <p>此账户当前没有持仓。</p>
-    {% endif %}
-
-    <div class="historical-pnl-section">
-        <h4>历史已实现盈亏 (P&L)</h4>
-        <div class="timeframe-selector">
-            <button class="btn-timeframe" data-account-id="{{ account_id }}" data-days="7">近7天</button>
-            <button class="btn-timeframe" data-account-id="{{ account_id }}" data-days="30">近30天</button>
-            <button class="btn-timeframe" data-account-id="{{ account_id }}" data-days="90">近90天</button>
-        </div>
-        <div class="chart-container" style="position: relative; height:250px; width:100%;">
-            <canvas id="pnlChart-{{ account_id }}"></canvas>
-        </div>
-    </div>
+    {% else %}<p>此账户当前没有持仓。</p>{% endif %}
 </div>
 {% endmacro %}
 
@@ -95,13 +40,56 @@
     <p class="timestamp">上次更新: <span id="last-updated">--:--:--</span></p>
 </div>
 
+<div class="account-switcher">
+    <button class="btn-account active" data-target-account="all">所有账户 (聚合)</button>
+    {% for account_id in all_data.keys() %}
+    <button class="btn-account" data-target-account="{{ account_id }}">{{ account_id }}</button>
+    {% endfor %}
+</div>
+
+<div id="all-accounts-view" class="account-card" data-account-id="all">
+    <h2><i class="fas fa-globe"></i> 所有账户 (聚合视图)</h2>
+    {% if aggregated_data %}
+    <div class="summary-grid">
+        <div class="summary-item"><span class="summary-label">总净清算价值</span><span class="summary-value">{{ "%.2f"|format(aggregated_data.summary.net_liquidation) }} {{ aggregated_data.summary.currency }}</span></div>
+        <div class="summary-item"><span class="summary-label">当日总未实现盈亏</span><span id="daily-unrealized-pnl-all" class="summary-value">--.--</span></div>
+        <div class="summary-item"><span class="summary-label">今日总已实现盈亏</span><span class="summary-value {% if aggregated_data.summary.realized_pnl > 0 %}pnl-positive{% elif aggregated_data.summary.realized_pnl < 0 %}pnl-negative{% endif %}">{{ "%.2f"|format(aggregated_data.summary.realized_pnl) }}</span></div>
+        <div class="summary-item"><span class="summary-label">总现金余额</span><span class="summary-value">{{ "%.2f"|format(aggregated_data.summary.cash) }}</span></div>
+        <div class="summary-item"><span class="summary-label">总购买力</span><span class="summary-value">{{ "%.2f"|format(aggregated_data.summary.buying_power) }}</span></div>
+    </div>
+    {% if aggregated_data.positions %}
+        <div style="overflow-x: auto;">
+            <table class="positions-table">
+                <thead>
+                    <tr><th>产品</th><th>资产类别</th><th>总数量</th><th>加权平均成本</th><th>总持仓成本</th><th>当前市价</th><th>总市值</th><th>总未实现盈亏</th><th>盈亏 (%)</th><th>当日总盈亏</th><th>持仓分布</th></tr>
+                </thead>
+                <tbody>
+                    {% for pos in aggregated_data.positions %}
+                        <tr data-conid="{{ pos.conid }}" data-position="{{ pos.position }}" data-avgcost="{{ pos.avgCost }}" data-costbasis="{{ pos.costBasis }}">
+                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td>
+                            <td class="holdings-breakdown">
+                                {% for acc_id, qty in pos.holdings_breakdown.items() %}
+                                    <span>{{ acc_id }}: <strong>{{ qty }}</strong></span>
+                                {% endfor %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}<p>当前没有持仓。</p>{% endif %}
+    {% endif %}
+</div>
+
 {% for account_id, data in all_data.items() %}
     {{ render_account_card(account_id, data) }}
 {% else %}
+    {% if not aggregated_data %}
     <div class="account-card">
         <h2><i class="fas fa-exclamation-circle"></i> 未能加载数据</h2>
-        <p>无法从 IBKR Gateway 获取任何账户信息。请检查 Gateway 是否正在运行并已完成登录认证。</p>
+        <p>无法从 IBKR Gateway 获取任何账户信息。</p>
     </div>
+    {% endif %}
 {% endfor %}
 {% endblock %}
 
@@ -109,146 +97,92 @@
 {# --- 页面专属的 JavaScript --- #}
 {% block scripts %}
 <script>
-    const charts = {}; // 用于存储图表实例
-
     function updatePnlCell(cell, pnlValue) {
         if (!cell) return;
         let pnlIcon = '';
-        if (pnlValue > 0.001) {
-            cell.className = 'updating pnl-positive';
-            pnlIcon = '<i class="fas fa-arrow-up pnl-icon"></i>';
-        } else if (pnlValue < -0.001) {
-            cell.className = 'updating pnl-negative';
-            pnlIcon = '<i class="fas fa-arrow-down pnl-icon"></i>';
-        } else {
-            cell.className = 'updating';
-            pnlIcon = '<i class="fas fa-minus pnl-icon"></i>';
-        }
+        if (pnlValue > 0.001) { cell.className = 'updating pnl-positive'; pnlIcon = '<i class="fas fa-arrow-up pnl-icon"></i>'; } 
+        else if (pnlValue < -0.001) { cell.className = 'updating pnl-negative'; pnlIcon = '<i class="fas fa-arrow-down pnl-icon"></i>'; } 
+        else { cell.className = 'updating'; pnlIcon = '<i class="fas fa-minus pnl-icon"></i>'; }
         cell.innerHTML = pnlIcon + pnlValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     function updatePrices() {
         const allRows = Array.from(document.querySelectorAll('tr[data-conid]'));
         if (allRows.length === 0) return;
-
-        const allConids = allRows.map(row => row.dataset.conid);
-        
+        const allConids = [...new Set(allRows.map(row => row.dataset.conid))];
         fetch(`/api/prices?conids=${allConids.join(',')}`)
             .then(response => response.json())
             .then(priceData => {
-                const accountDailyPnl = {};
-
+                const accountDailyPnl = {'all': 0};
                 allRows.forEach(row => {
                     const conid = row.dataset.conid;
                     const priceInfo = priceData[conid];
                     if (!priceInfo || isNaN(parseFloat(priceInfo.price))) return;
-
                     const latestPrice = parseFloat(priceInfo.price);
                     const dailyChange = parseFloat(priceInfo.change);
                     const position = parseFloat(row.dataset.position);
                     const costBasis = parseFloat(row.dataset.costbasis);
                     const accountCard = row.closest('.account-card');
-                    const accountId = accountCard.id.split('-')[1];
+                    const accountId = accountCard.dataset.accountId;
 
-                    // Calculations
                     const marketValue = latestPrice * position;
                     const unrealizedPnl = marketValue - costBasis;
                     const dailyPnl = isNaN(dailyChange) ? 0 : dailyChange * position;
                     const pnlPercent = (costBasis !== 0) ? (unrealizedPnl / costBasis) * 100 : 0;
-
-                    // Aggregate daily PnL per account
+                    
                     if (!accountDailyPnl[accountId]) accountDailyPnl[accountId] = 0;
                     accountDailyPnl[accountId] += dailyPnl;
+                    if (accountId !== 'all') accountDailyPnl['all'] += dailyPnl;
 
-                    // Update table cells
-                    document.getElementById(`price-${conid}`).textContent = latestPrice.toFixed(2);
-                    document.getElementById(`marketValue-${conid}`).textContent = marketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    const pnlPercentCell = document.getElementById(`pnlPercent-${conid}`);
-                    pnlPercentCell.className = unrealizedPnl > 0.001 ? 'pnl-positive' : (unrealizedPnl < -0.001 ? 'pnl-negative' : '');
-                    pnlPercentCell.textContent = pnlPercent.toFixed(2) + '%';
-                    
-                    updatePnlCell(document.getElementById(`pnl-${conid}`), unrealizedPnl);
-                    updatePnlCell(document.getElementById(`dailyPnl-${conid}`), dailyPnl);
+                    const priceCells = document.querySelectorAll(`#price-${conid}`);
+                    const marketValueCells = document.querySelectorAll(`#marketValue-${conid}`);
+                    const pnlCells = document.querySelectorAll(`#pnl-${conid}`);
+                    const pnlPercentCells = document.querySelectorAll(`#pnlPercent-${conid}`);
+                    const dailyPnlCells = document.querySelectorAll(`#dailyPnl-${conid}`);
 
-                    // Highlight effect
-                    const priceCell = document.getElementById(`price-${conid}`);
-                    priceCell.style.backgroundColor = 'var(--highlight-color)';
-                    setTimeout(() => { priceCell.style.backgroundColor = ''; }, 1200);
+                    priceCells.forEach(cell => {
+                        if (priceInfo.is_close) { cell.innerHTML = `${latestPrice.toFixed(2)} <span class="closing-price-tag">(收盘价)</span>`; cell.classList.add('is-closing-price'); } 
+                        else { cell.textContent = latestPrice.toFixed(2); cell.classList.remove('is-closing-price'); }
+                        cell.style.backgroundColor = 'var(--highlight-color)';
+                        setTimeout(() => { cell.style.backgroundColor = ''; }, 1200);
+                    });
+                    marketValueCells.forEach(cell => cell.textContent = marketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                    pnlPercentCells.forEach(cell => {
+                        cell.className = unrealizedPnl > 0.001 ? 'pnl-positive' : (unrealizedPnl < -0.001 ? 'pnl-negative' : '');
+                        cell.textContent = pnlPercent.toFixed(2) + '%';
+                    });
+                    pnlCells.forEach(cell => updatePnlCell(cell, unrealizedPnl));
+                    dailyPnlCells.forEach(cell => updatePnlCell(cell, dailyPnl));
                 });
-
-                // Update account summary daily PnL
                 for (const [accountId, totalDailyPnl] of Object.entries(accountDailyPnl)) {
-                    const summaryCell = document.getElementById(`daily-unrealized-pnl-${accountId}`);
-                    summaryCell.className = totalDailyPnl > 0.001 ? 'summary-value pnl-positive' : (totalDailyPnl < -0.001 ? 'summary-value pnl-negative' : 'summary-value');
-                    summaryCell.textContent = totalDailyPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    document.querySelectorAll(`#daily-unrealized-pnl-${accountId}`).forEach(cell => {
+                         cell.className = totalDailyPnl > 0.001 ? 'summary-value pnl-positive' : (totalDailyPnl < -0.001 ? 'summary-value pnl-negative' : 'summary-value');
+                         cell.textContent = totalDailyPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    });
                 }
-                
                 document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
-            })
-            .catch(error => {
-                console.error('更新价格失败:', error);
-                document.getElementById('last-updated').innerHTML = '<span style="color:red;">更新失败</span>';
-            });
+            }).catch(error => console.error('更新价格失败:', error));
     }
 
-    function fetchAndDrawPnlChart(accountId, days) {
-        fetch(`/api/historical_pnl?accountId=${accountId}`)
-            .then(response => response.json())
-            .then(data => {
-                const processedData = data.reverse().slice(-days); 
-                const labels = processedData.map(d => d.date);
-                const pnlValues = processedData.map(d => d.pnl);
-
-                const backgroundColors = pnlValues.map(pnl => pnl >= 0 ? 'rgba(216, 0, 12, 0.6)' : 'rgba(46, 125, 50, 0.6)');
-                const borderColors = pnlValues.map(pnl => pnl >= 0 ? 'rgba(216, 0, 12, 1)' : 'rgba(46, 125, 50, 1)');
-
-                const ctx = document.getElementById(`pnlChart-${accountId}`).getContext('2d');
-                if (charts[accountId]) charts[accountId].destroy();
-
-                charts[accountId] = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: '每日已实现盈亏',
-                            data: pnlValues,
-                            backgroundColor: backgroundColors,
-                            borderColor: borderColors,
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        scales: { y: { beginAtZero: false } },
-                        plugins: { legend: { display: false } },
-                        maintainAspectRatio: false,
-                        responsive: true
-                    }
-                });
-            })
-            .catch(error => console.error('获取历史盈亏失败:', error));
+    function switchAccountView(targetAccountId) {
+        document.querySelectorAll('.btn-account').forEach(button => {
+            button.classList.toggle('active', button.dataset.targetAccount === targetAccountId);
+        });
+        document.querySelectorAll('.account-card').forEach(card => {
+            card.style.display = (card.dataset.accountId === targetAccountId) ? 'block' : 'none';
+        });
     }
 
     document.addEventListener('DOMContentLoaded', () => {
         updatePrices();
         setInterval(updatePrices, 15000);
-
-        document.querySelectorAll('.btn-timeframe').forEach(button => {
+        document.querySelectorAll('.btn-account').forEach(button => {
             button.addEventListener('click', (event) => {
-                const accountId = event.target.dataset.accountId;
-                const days = parseInt(event.target.dataset.days, 10);
-                document.querySelectorAll(`.btn-timeframe[data-account-id="${accountId}"]`).forEach(btn => btn.classList.remove('active'));
-                event.target.classList.add('active');
-                fetchAndDrawPnlChart(accountId, days);
+                const targetId = event.currentTarget.dataset.targetAccount;
+                switchAccountView(targetId);
             });
         });
-
-        document.querySelectorAll('.account-card').forEach(card => {
-            if(card.id) {
-                const accountId = card.id.split('-')[1];
-                const defaultButton = document.querySelector(`.btn-timeframe[data-account-id="${accountId}"][data-days="30"]`);
-                if (defaultButton) defaultButton.click();
-            }
-        });
+        switchAccountView('all');
     });
 </script>
 {% endblock %}
