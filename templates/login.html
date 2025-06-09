@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+
+{% block title %}等待 IBKR 登录{% endblock %}
+
+{% block head_extra %}
+<style>
+    .login-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 70vh;
+        text-align: center;
+    }
+    .login-container h1 {
+        color: var(--primary-color);
+        margin-bottom: 20px;
+    }
+    .login-container p {
+        color: #6c757d;
+        font-size: 1.1em;
+        max-width: 500px;
+    }
+    .spinner {
+        border: 6px solid #f3f3f3;
+        border-top: 6px solid var(--primary-color);
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        animation: spin 1.5s linear infinite;
+        margin: 30px auto;
+    }
+    .success-message {
+        color: var(--secondary-color);
+        font-weight: bold;
+        font-size: 1.2em;
+    }
+    .error-message {
+        color: var(--positive-color);
+        font-weight: bold;
+        margin-top: 15px;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div id="login-view" class="login-container">
+    <i class="fas fa-lock fa-3x" style="color: var(--primary-color); margin-bottom: 20px;"></i>
+    <h1>正在等待 IBKR Gateway 认证...</h1>
+    <p>
+        应用已自动为您打开 IBKR 登录页面。请在 <strong>新打开的窗口或标签页</strong> 中完成登录。
+        登录成功后，此页面将自动跳转至仪表盘。
+    </p>
+    <div class="spinner"></div>
+    <p>如果登录窗口未弹出, 请 <a href="https://localhost:5000" target="_blank" rel="noopener noreferrer">点击这里手动打开</a>.</p>
+    {% if error %}
+        <p class="error-message">{{ error }}</p>
+    {% endif %}
+</div>
+
+<div id="success-view" class="login-container" style="display: none;">
+    <i class="fas fa-check-circle fa-3x" style="color: var(--secondary-color); margin-bottom: 20px;"></i>
+    <h1 class="success-message">认证成功!</h1>
+    <p>正在为您跳转至仪表盘...</p>
+    <div class="spinner"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const loginView = document.getElementById('login-view');
+        const successView = document.getElementById('success-view');
+
+        // 定义一个函数来检查认证状态
+        const checkAuth = () => {
+            fetch('/api/check_auth')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Auth status:', data.status, new Date().toLocaleTimeString());
+                    if (data.status === 'success') {
+                        // --- 核心修复点 ---
+                        // 1. 立即停止轮询，防止循环
+                        clearInterval(intervalId); 
+                        
+                        // 2. 提供视觉反馈
+                        loginView.style.display = 'none';
+                        successView.style.display = 'flex';
+
+                        // 3. 稍作延迟后跳转，让用户看到成功信息
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1000); // 延迟1秒跳转
+                    }
+                })
+                .catch(err => {
+                    console.error('检查认证状态时出错:', err);
+                });
+        }
+
+        // 自动打开登录窗口
+        {% if not error %}
+            window.open('https://localhost:5000', '_blank', 'noopener,noreferrer');
+        {% endif %}
+
+        // 每3秒钟检查一次认证状态
+        const intervalId = setInterval(checkAuth, 3000);
+
+        // 为了防止无限轮询，可以在一段时间后停止 (可选，但推荐)
+        setTimeout(() => {
+            clearInterval(intervalId);
+        }, 300000); // 5 分钟后超时
+    });
+</script>
+{% endblock %}
