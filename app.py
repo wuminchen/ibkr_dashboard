@@ -2,7 +2,8 @@
 
 import requests
 import pandas as pd
-from flask import Flask, render_template, jsonify, request as flask_request, redirect, url_for
+# --- 修改：增加 Response 用于处理 favicon ---
+from flask import Flask, render_template, jsonify, request as flask_request, redirect, url_for, Response
 import json
 import sys
 import os
@@ -12,21 +13,17 @@ import platform
 from datetime import datetime, timedelta
 import webbrowser
 import threading
-# --- 修改开始: 导入并发处理库 ---
 import concurrent.futures
-# --- 修改结束 ---
 
 # --- 应用程序配置 ---
 app = Flask(__name__)
 app.template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
 BASE_URL = "https://localhost:5000/v1/api/"
-# 禁用 InsecureRequestWarning 警告
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 
-# --- 核心功能函数 (与之前相同) ---
+# --- 核心功能函数 (无改动) ---
 def is_gateway_running():
-    """检查网关认证状态"""
     try:
         response = requests.get(f"{BASE_URL}iserver/auth/status", verify=False, timeout=2)
         return response.status_code == 200 and response.json().get('connected')
@@ -34,7 +31,6 @@ def is_gateway_running():
         return False
 
 def start_gateway():
-    """尝试自动启动网关"""
     print(">>> 正在尝试自动启动 IBKR Gateway...")
     project_root = os.path.dirname(os.path.abspath(__file__))
     gateway_path = os.path.join(project_root, 'clientportal.gw')
@@ -59,7 +55,6 @@ def start_gateway():
         return False
 
 def get_all_account_ids():
-    """获取所有真实的账户ID列表。"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/accounts", verify=False, timeout=5)
         if response.status_code == 200:
@@ -72,7 +67,6 @@ def get_all_account_ids():
         return None
 
 def get_account_summary(account_id):
-    """获取指定账户的摘要信息"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/{account_id}/summary", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else {}
@@ -80,7 +74,6 @@ def get_account_summary(account_id):
         return {}
         
 def get_account_positions(account_id):
-    """获取账户的详细持仓列表"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/{account_id}/positions/0", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else []
@@ -88,11 +81,10 @@ def get_account_positions(account_id):
         return []
 
 def get_price_snapshots(conids):
-    """获取价格快照"""
     if not conids: return {}
     try:
         endpoint_url = f"{BASE_URL}md/snapshot"
-        params = {'conids': ','.join(conids), 'fields': '31,83'} # 31=最后价, 83=日涨跌
+        params = {'conids': ','.join(conids), 'fields': '31,83'}
         response = requests.get(endpoint_url, params=params, verify=False, timeout=5)
         if response.status_code == 200:
             return {str(item.get('conid')): item for item in response.json()}
@@ -101,7 +93,6 @@ def get_price_snapshots(conids):
         return {}
 
 def aggregate_portfolio_data(all_data):
-    """聚合所有账户的数据，生成一个统一的视图。"""
     aggregated_summary = {
         'net_liquidation': 0, 'realized_pnl': 0, 'cash': 0,
         'buying_power': 0, 'currency': 'USD' 
@@ -111,7 +102,7 @@ def aggregate_portfolio_data(all_data):
         return {'summary': aggregated_summary, 'positions': []}
 
     for account_id, data in all_data.items():
-        if not data or not data.get('summary'): continue # 如果并行请求失败，跳过这个账户
+        if not data or not data.get('summary'): continue
 
         aggregated_summary['net_liquidation'] += data['summary']['net_liquidation']
         aggregated_summary['realized_pnl'] += data['summary']['realized_pnl']
@@ -141,10 +132,7 @@ def aggregate_portfolio_data(all_data):
     return {'summary': aggregated_summary, 'positions': final_positions}    
 
 # --- Flask 路由 ---
-
-# --- 修改开始: 定义一个辅助函数用于获取单个账户的完整数据 ---
 def fetch_account_data(acc_id):
-    """获取单个账户的摘要和持仓，并进行处理"""
     print(f"--> 开始获取账户 {acc_id} 的数据...")
     summary_raw = get_account_summary(acc_id)
     positions_raw = get_account_positions(acc_id)
@@ -172,12 +160,15 @@ def fetch_account_data(acc_id):
     
     print(f"<-- 完成获取账户 {acc_id} 的数据。")
     return acc_id, {'summary': summary_data, 'positions': processed_positions}
-# --- 修改结束 ---
 
+# --- *** 新增路由：处理 favicon.ico 请求 *** ---
+@app.route('/favicon.ico')
+def favicon():
+    # 返回 204 No Content 响应，告诉浏览器这里没有图标，避免404错误
+    return Response(status=204)
 
 @app.route('/')
 def home():
-    """主仪表盘页面 (采用并行数据加载)"""
     print("\n--- 正在并行加载所有账户数据... ---")
     start_time = time.time()
     
@@ -187,24 +178,17 @@ def home():
         return render_template('login.html', error="获取账户信息失败，请在弹窗中重新登录。")
 
     all_data = {}
-    # --- 修改开始: 使用ThreadPoolExecutor并行获取数据 ---
-    # 设置线程池的最大线程数为账户数或一个合理上限(如10)，防止创建过多线程
     max_workers = min(len(account_ids), 10)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有任务到线程池
         future_to_account = {executor.submit(fetch_account_data, acc_id): acc_id for acc_id in account_ids}
-        
-        # 等待并处理已完成的任务
         for future in concurrent.futures.as_completed(future_to_account):
             acc_id = future_to_account[future]
             try:
-                # 获取任务返回的结果 (acc_id, data_dict)
                 _, data = future.result()
                 all_data[acc_id] = data
             except Exception as exc:
                 print(f"!!! 获取账户 {acc_id} 数据时产生异常: {exc}")
-                all_data[acc_id] = None # 标记失败的请求
-    # --- 修改结束 ---
+                all_data[acc_id] = None
     
     aggregated_data = aggregate_portfolio_data(all_data)
     
@@ -213,10 +197,8 @@ def home():
     
     return render_template('index.html', all_data=all_data, aggregated_data=aggregated_data)
 
-
 @app.route('/api/prices')
 def api_prices():
-    """提供给前端的价格更新API"""
     conids_str = flask_request.args.get('conids', '')
     if not conids_str: 
         return jsonify({})
@@ -239,7 +221,6 @@ def api_prices():
 
 @app.route('/login')
 def login_page():
-    """智能登录入口"""
     print(">>> 正在检查网关认证状态...")
     if is_gateway_running():
         print(">>> ✅ 网关已认证，直接跳转至主仪表盘。")
@@ -250,7 +231,6 @@ def login_page():
 
 @app.route('/api/check_auth')
 def check_auth_status():
-    """供前端调用的API，用于检查网关是否已认证"""
     if is_gateway_running():
         return jsonify({'status': 'success'})
     else:
@@ -258,7 +238,6 @@ def check_auth_status():
 
 # --- 主程序入口 ---
 def open_browser():
-      """延迟一秒后打开浏览器，确保服务器已启动"""
       webbrowser.open_new("http://127.0.0.1:8000/login")
 
 if __name__ == '__main__':
@@ -273,8 +252,6 @@ if __name__ == '__main__':
 
     print("\n>>> ✅ Flask Web 服务器已启动。")
     print(">>> ➡️  正在为您打开浏览器...")
-    print(">>> ➡️  请在弹出的 IBKR 页面中完成登录认证。")
-    print(">>> ➡️  登录成功后，本应用页面将自动刷新。")
     
     threading.Timer(1, open_browser).start()
     
