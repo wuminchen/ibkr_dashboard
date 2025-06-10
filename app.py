@@ -1,4 +1,4 @@
-# app.py (优化后版本)
+# app.py (性能优化版)
 
 import requests
 import pandas as pd
@@ -12,6 +12,9 @@ import platform
 from datetime import datetime, timedelta
 import webbrowser
 import threading
+# --- 修改开始: 导入并发处理库 ---
+import concurrent.futures
+# --- 修改结束 ---
 
 # --- 应用程序配置 ---
 app = Flask(__name__)
@@ -48,7 +51,6 @@ def start_gateway():
         print(f"!!! 错误: 启动脚本未找到: {run_script}")
         return False
     try:
-        # 使用 Popen 在后台启动网关进程
         subprocess.Popen([run_script, conf_file], cwd=gateway_path, creationflags=flags)
         print(">>> ✅ 网关启动命令已发送。请等待其初始化。")
         return True
@@ -72,7 +74,7 @@ def get_all_account_ids():
 def get_account_summary(account_id):
     """获取指定账户的摘要信息"""
     try:
-        response = requests.get(f"{BASE_URL}portfolio/{account_id}/summary", verify=False, timeout=5)
+        response = requests.get(f"{BASE_URL}portfolio/{account_id}/summary", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else {}
     except requests.exceptions.RequestException:
         return {}
@@ -80,7 +82,7 @@ def get_account_summary(account_id):
 def get_account_positions(account_id):
     """获取账户的详细持仓列表"""
     try:
-        response = requests.get(f"{BASE_URL}portfolio/{account_id}/positions/0", verify=False, timeout=5)
+        response = requests.get(f"{BASE_URL}portfolio/{account_id}/positions/0", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else []
     except requests.exceptions.RequestException:
         return []
@@ -109,6 +111,8 @@ def aggregate_portfolio_data(all_data):
         return {'summary': aggregated_summary, 'positions': []}
 
     for account_id, data in all_data.items():
+        if not data or not data.get('summary'): continue # 如果并行请求失败，跳过这个账户
+
         aggregated_summary['net_liquidation'] += data['summary']['net_liquidation']
         aggregated_summary['realized_pnl'] += data['summary']['realized_pnl']
         aggregated_summary['cash'] += data['summary']['cash']
@@ -137,38 +141,78 @@ def aggregate_portfolio_data(all_data):
     return {'summary': aggregated_summary, 'positions': final_positions}    
 
 # --- Flask 路由 ---
+
+# --- 修改开始: 定义一个辅助函数用于获取单个账户的完整数据 ---
+def fetch_account_data(acc_id):
+    """获取单个账户的摘要和持仓，并进行处理"""
+    print(f"--> 开始获取账户 {acc_id} 的数据...")
+    summary_raw = get_account_summary(acc_id)
+    positions_raw = get_account_positions(acc_id)
+    
+    processed_positions = []
+    if isinstance(positions_raw, list):
+        for p in positions_raw:
+            try:
+                p['costBasis'] = float(p.get('position', 0)) * float(p.get('avgCost', 0))
+                processed_positions.append(p)
+            except (ValueError, TypeError):
+                p['costBasis'] = 0
+                processed_positions.append(p)
+
+    summary_data = {
+        key: float(summary_raw.get(val, {}).get('amount', 0)) 
+        for key, val in [
+            ('net_liquidation', 'netliquidation'), 
+            ('realized_pnl', 'realizedpnl'), 
+            ('cash', 'cashbalance'), 
+            ('buying_power', 'buyingpower')
+        ]
+    }
+    summary_data['currency'] = summary_raw.get('netliquidation', {}).get('currency', 'USD')
+    
+    print(f"<-- 完成获取账户 {acc_id} 的数据。")
+    return acc_id, {'summary': summary_data, 'positions': processed_positions}
+# --- 修改结束 ---
+
+
 @app.route('/')
 def home():
-    """主仪表盘页面"""
-    print("\n--- 正在加载主页数据... ---")
+    """主仪表盘页面 (采用并行数据加载)"""
+    print("\n--- 正在并行加载所有账户数据... ---")
+    start_time = time.time()
+    
     account_ids = get_all_account_ids()
     if not account_ids:
         print(">>> 警告: 未能获取到任何账户ID。可能需要重新认证。")
-        # 如果获取不到账户信息，重定向到登录页
         return render_template('login.html', error="获取账户信息失败，请在弹窗中重新登录。")
 
     all_data = {}
-    for acc_id in account_ids:
-        summary_raw = get_account_summary(acc_id)
-        positions_raw = get_account_positions(acc_id)
-        processed_positions = []
-        if isinstance(positions_raw, list):
-            for p in positions_raw:
-                try:
-                    p['costBasis'] = float(p.get('position', 0)) * float(p.get('avgCost', 0))
-                    processed_positions.append(p)
-                except (ValueError, TypeError):
-                    p['costBasis'] = 0
-                    processed_positions.append(p)
-
-        all_data[acc_id] = {
-            'summary': { key: float(summary_raw.get(val, {}).get('amount', 0)) for key, val in [('net_liquidation', 'netliquidation'), ('realized_pnl', 'realizedpnl'), ('cash', 'cashbalance'), ('buying_power', 'buyingpower')] },
-            'positions': processed_positions
-        }
-        all_data[acc_id]['summary']['currency'] = summary_raw.get('netliquidation', {}).get('currency', 'USD')
+    # --- 修改开始: 使用ThreadPoolExecutor并行获取数据 ---
+    # 设置线程池的最大线程数为账户数或一个合理上限(如10)，防止创建过多线程
+    max_workers = min(len(account_ids), 10)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务到线程池
+        future_to_account = {executor.submit(fetch_account_data, acc_id): acc_id for acc_id in account_ids}
+        
+        # 等待并处理已完成的任务
+        for future in concurrent.futures.as_completed(future_to_account):
+            acc_id = future_to_account[future]
+            try:
+                # 获取任务返回的结果 (acc_id, data_dict)
+                _, data = future.result()
+                all_data[acc_id] = data
+            except Exception as exc:
+                print(f"!!! 获取账户 {acc_id} 数据时产生异常: {exc}")
+                all_data[acc_id] = None # 标记失败的请求
+    # --- 修改结束 ---
     
     aggregated_data = aggregate_portfolio_data(all_data)
+    
+    end_time = time.time()
+    print(f"--- ✅ 所有数据加载完毕，总耗时: {end_time - start_time:.2f} 秒 ---")
+    
     return render_template('index.html', all_data=all_data, aggregated_data=aggregated_data)
+
 
 @app.route('/api/prices')
 def api_prices():
@@ -177,12 +221,8 @@ def api_prices():
     if not conids_str: 
         return jsonify({})
         
-    # --- 修改开始 ---
-    # 1. 首先，创建 conids 列表
     conids = conids_str.split(',')
-    # 2. 然后，将创建好的 conids 传递给函数
     raw_price_data = get_price_snapshots(conids)
-    # --- 修改结束 ---
     
     price_dict = {}
     for conid in conids:
@@ -196,22 +236,16 @@ def api_prices():
                 'is_close': is_closing_price
             }
     return jsonify(price_dict)
-# --- 新增的路由 ---
+
 @app.route('/login')
 def login_page():
-    """
-    智能登录入口：
-    - 如果网关已认证，直接重定向到主页。
-    - 如果未认证，才显示等待登录页面。
-    """
+    """智能登录入口"""
     print(">>> 正在检查网关认证状态...")
     if is_gateway_running():
         print(">>> ✅ 网关已认证，直接跳转至主仪表盘。")
-        # 使用 redirect 和 url_for 直接跳转到 home() 函数对应的路由 ('/')
         return redirect(url_for('home'))
     else:
         print(">>> ⚠️ 网关未认证，显示登录页面。")
-        # 网关未连接，按原流程显示等待页面，让前端JS去处理
         return render_template('login.html')
 
 @app.route('/api/check_auth')
@@ -232,23 +266,19 @@ if __name__ == '__main__':
     print(" 启动 IBKR 实时报告应用 ".center(40, "="))
     print("="*40)
     
-    # 无论如何都先尝试启动一次网关
-    # 如果已在运行，这个操作是无害的
     if not is_gateway_running():
         start_gateway()
         print(">>> 等待网关初始化 (约10-15秒)...")
-        time.sleep(10) # 留出时间给网关进程启动
+        time.sleep(10)
 
     print("\n>>> ✅ Flask Web 服务器已启动。")
     print(">>> ➡️  正在为您打开浏览器...")
     print(">>> ➡️  请在弹出的 IBKR 页面中完成登录认证。")
     print(">>> ➡️  登录成功后，本应用页面将自动刷新。")
     
-    # 使用线程计时器，在Flask服务器启动1秒后打开浏览器
     threading.Timer(1, open_browser).start()
     
     try:
-        # 运行Flask应用，关闭调试模式以获得更稳定的体验
         app.run(host='127.0.0.1', port=8000, debug=False)
     except OSError as e:
         print(f"!!! 启动 Web 服务器失败: {e}")
