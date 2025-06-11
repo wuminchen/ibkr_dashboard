@@ -5,16 +5,15 @@
 
 {% block head_extra %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
 <style>
-    body {
-        padding: 0;
-        background-color: #f0f2f5;
-    }
     .dashboard-container {
         display: flex;
+        width: 100%;
         height: 100vh;
     }
+
     /* --- 左侧边栏 --- */
     .sidebar {
         width: 320px;
@@ -24,6 +23,8 @@
         display: flex;
         flex-direction: column;
         overflow-y: auto;
+        flex-shrink: 0;
+        transition: all 0.3s ease;
     }
     .sidebar-header {
         text-align: center;
@@ -32,9 +33,6 @@
     .sidebar-header h1 {
         font-size: 1.5rem;
         color: var(--primary-color);
-    }
-    .sidebar-header .fas {
-        margin-right: 10px;
     }
     .sidebar .account-switcher {
         display: flex;
@@ -46,6 +44,20 @@
         width: 100%;
         text-align: left;
         border-radius: 6px;
+        padding: 8px 12px;
+        cursor: pointer;
+        border: 1px solid #ccc;
+        background-color: #fff;
+        transition: all 0.2s ease-in-out;
+    }
+    .sidebar .btn-account:hover {
+        background-color: #e9ecef;
+        border-color: #aaa;
+    }
+    .sidebar .btn-account.active {
+        background-color: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
     }
     .summary-section h3 {
         font-size: 1.1rem;
@@ -63,6 +75,10 @@
         border-left: none;
         padding: 0;
     }
+    .summary-value {
+        font-size: 1.3em;
+    }
+
     /* --- 右侧主内容区 --- */
     .main-content {
         flex-grow: 1;
@@ -76,7 +92,7 @@
         margin-bottom: 24px;
     }
     .main-header h2 {
-        font-size: 2rem;
+        font-size: 2.2rem;
         margin: 0;
         color: #111;
     }
@@ -84,10 +100,11 @@
         font-size: 1rem;
         color: #666;
     }
-    /* --- 可视化图表卡片 --- */
+
+    /* --- 可视化与表格 --- */
     .charts-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
         gap: 24px;
         margin-bottom: 32px;
     }
@@ -104,36 +121,84 @@
         font-size: 1.1rem;
         color: #333;
     }
-    /* 表格容器样式 */
     .positions-section .account-card {
         background-color: #fff;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         padding: 24px 32px;
-        overflow: hidden;
+        overflow-x: auto;
     }
-    /* --- 表格排序样式 --- */
+    .positions-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 15px;
+    }
+    .positions-table thead th {
+        font-size: 0.9em;
+        padding: 12px 10px;
+    }
+    .positions-table th, .positions-table td {
+        padding: 14px 10px;
+        border-bottom: 1px solid var(--border-color);
+        text-align: left;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    /* --- 表格排序和高亮动画样式 --- */
     th[data-sortable="true"] { cursor: pointer; position: relative; user-select: none; }
     th[data-sortable="true"]::after { content: ''; position: absolute; right: 8px; top: 50%; margin-top: -8px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; opacity: 0.3; }
     th[data-sortable="true"]:not([data-sort-direction])::after { content: ' \2195'; margin-top: -12px; }
     th[data-sortable="true"][data-sort-direction="asc"]::after { border-bottom: 6px solid #333; opacity: 1; }
     th[data-sortable="true"][data-sort-direction="desc"]::after { border-top: 6px solid #333; opacity: 1; }
-
-    /* --- 红涨绿跌高亮动画 --- */
     @keyframes highlight-red-fade {
-        from { background-color: rgba(216, 0, 12, 0.3); } /* 红色背景 */
+        from { background-color: rgba(216, 0, 12, 0.3); }
         to { background-color: transparent; }
     }
     .highlight-up {
         animation: highlight-red-fade 1.5s ease-out;
     }
-
     @keyframes highlight-green-fade {
-        from { background-color: rgba(45, 125, 50, 0.3); } /* 绿色背景 */
+        from { background-color: rgba(45, 125, 50, 0.3); }
         to { background-color: transparent; }
     }
     .highlight-down {
         animation: highlight-green-fade 1.5s ease-out;
+    }
+
+    /* --- 响应式设计核心 --- */
+    @media (max-width: 1024px) {
+        body {
+             height: auto;
+             overflow-y: auto;
+        }
+        .dashboard-container {
+            flex-direction: column;
+            height: auto;
+        }
+        .sidebar {
+            width: 100%;
+            height: auto;
+            box-sizing: border-box;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            margin-bottom: 24px;
+            overflow-y: visible;
+        }
+        .main-content {
+            overflow-y: visible;
+            padding: 0 24px 32px;
+        }
+    }
+    @media (max-width: 768px) {
+        .sidebar { padding: 16px; }
+        .main-content { padding: 0 16px 16px; }
+        .positions-section .account-card { padding: 16px; }
+        .main-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .main-header h2 { font-size: 1.8rem; }
     }
 </style>
 {% endblock %}
@@ -184,7 +249,7 @@
                 <canvas id="net-liq-history-chart"></canvas>
             </div>
             <div class="chart-card">
-                <h4><i class="fas fa-chart-bar"></i> 盈亏影响 Top 5</h4>
+                <h4><i class="fas fa-chart-bar"></i> 当日盈亏排行 Top 5</h4>
                 <canvas id="pnl-barchart"></canvas>
             </div>
         </div>
@@ -192,11 +257,11 @@
             <div id="table-view-all" class="account-card" data-account-id="all">
                  {% if aggregated_data.positions %}
                 <table class="positions-table sortable-table">
-                    <thead><tr><th data-sortable="true" data-type="text">产品</th><th data-sortable="true" data-type="text">资产类别</th><th data-sortable="true" data-type="numeric">总数量</th><th data-sortable="true" data-type="numeric">加权平均成本</th><th data-sortable="true" data-type="numeric">总持仓成本</th><th data-sortable="true" data-type="numeric">当前市价</th><th data-sortable="true" data-type="numeric">总市值</th><th data-sortable="true" data-type="numeric">总未实现盈亏</th><th data-sortable="true" data-type="numeric">盈亏 (%)</th><th data-sortable="true" data-type="numeric">当日总盈亏</th><th>持仓分布</th></tr></thead>
+                    <thead><tr><th data-sortable="true" data-type="text">产品</th><th data-sortable="true" data-type="text">资产类别</th><th data-sortable="true" data-type="numeric">总数量</th><th data-sortable="true" data-type="numeric">加权平均成本</th><th data-sortable="true" data-type="numeric">总持仓成本</th><th data-sortable="true" data-type="numeric">当前市价</th><th data-sortable="true" data-type="numeric">总市值</th><th data-sortable="true" data-type="numeric">总未实现盈亏</th><th data-sortable="true" data-type="numeric">盈亏 (%)</th><th data-sortable="true" data-type="numeric">股价变化 (%)</th><th data-sortable="true" data-type="numeric">当日总盈亏</th><th>持仓分布</th></tr></thead>
                     <tbody>
                         {% for pos in aggregated_data.positions %}
                         <tr data-conid="{{ pos.conid }}" data-position="{{ pos.position }}" data-avgcost="{{ pos.avgCost }}" data-costbasis="{{ pos.costBasis }}" data-assetclass="{{ pos.assetClass }}" data-contractdesc="{{ pos.contractDesc }}">
-                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td>
+                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="priceChangePercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td>
                             <td class="holdings-breakdown">{% for acc_id, qty in pos.holdings_breakdown.items() %}<span>{{ acc_id }}: <strong>{{ qty }}</strong></span>{% endfor %}</td></tr>
                         {% endfor %}
                     </tbody>
@@ -207,11 +272,11 @@
             <div id="table-view-{{ account_id }}" class="account-card" data-account-id="{{ account_id }}" style="display: none;">
                 {% if data.positions %}
                 <table class="positions-table sortable-table">
-                    <thead><tr><th data-sortable="true" data-type="text">产品</th><th data-sortable="true" data-type="text">资产类别</th><th data-sortable="true" data-type="numeric">数量</th><th data-sortable="true" data-type="numeric">平均成本</th><th data-sortable="true" data-type="numeric">持仓成本</th><th data-sortable="true" data-type="numeric">当前市价</th><th data-sortable="true" data-type="numeric">总市值</th><th data-sortable="true" data-type="numeric">未实现盈亏</th><th data-sortable="true" data-type="numeric">盈亏 (%)</th><th data-sortable="true" data-type="numeric">当日盈亏</th><th>货币</th></tr></thead>
+                    <thead><tr><th data-sortable="true" data-type="text">产品</th><th data-sortable="true" data-type="text">资产类别</th><th data-sortable="true" data-type="numeric">数量</th><th data-sortable="true" data-type="numeric">平均成本</th><th data-sortable="true" data-type="numeric">持仓成本</th><th data-sortable="true" data-type="numeric">当前市价</th><th data-sortable="true" data-type="numeric">总市值</th><th data-sortable="true" data-type="numeric">未实现盈亏</th><th data-sortable="true" data-type="numeric">盈亏 (%)</th><th data-sortable="true" data-type="numeric">股价变化 (%)</th><th data-sortable="true" data-type="numeric">当日盈亏</th><th>货币</th></tr></thead>
                     <tbody>
                          {% for pos in data.positions %}
                         <tr data-conid="{{ pos.conid }}" data-position="{{ pos.position }}" data-avgcost="{{ pos.avgCost }}" data-costbasis="{{ pos.costBasis }}" data-assetclass="{{ pos.assetClass }}" data-contractdesc="{{ pos.contractDesc }}">
-                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td><td>{{ pos.currency }}</td></tr>
+                            <td><strong>{{ pos.contractDesc }}</strong></td><td>{{ pos.assetClass }}</td><td>{{ pos.position }}</td><td>{{ "%.2f"|format(pos.avgCost) }}</td><td>{{ "%.2f"|format(pos.costBasis) }}</td><td id="price-{{ pos.conid }}" class="updating">--.--</td><td id="marketValue-{{ pos.conid }}" class="updating">--.--</td><td id="pnl-{{ pos.conid }}" class="updating">--.--</td><td id="pnlPercent-{{ pos.conid }}" class="updating">--.--%</td><td id="priceChangePercent-{{ pos.conid }}" class="updating">--.--%</td><td id="dailyPnl-{{ pos.conid }}" class="updating">--.--</td><td>{{ pos.currency }}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -228,8 +293,7 @@
 {% block scripts %}
 <script>
     const UPDATE_INTERVAL_MS = 3000;
-    // *** 新增：定义图表预热更新次数 ***
-    const CHART_WARMUP_UPDATES = 2; // 忽略前2次更新，从第3次开始显示图表
+    const CHART_WARMUP_UPDATES = 2;
 
     let chartInstances = {};
     let netLiqHistory = {};
@@ -322,11 +386,13 @@
                     const unrealizedPnl = marketValue - costBasis;
                     const dailyPnl = dailyChange * position;
                     const pnlPercent = (costBasis !== 0) ? (unrealizedPnl / costBasis) * 100 : 0;
+                    const previousClose = latestPrice - dailyChange;
+                    const priceChangePercent = (previousClose !== 0) ? (dailyChange / previousClose) * 100 : 0;
                     const accountId = row.closest('.account-card').dataset.accountId;
 
                     calculatedData.push({
                         row, accountId, contractDesc: row.dataset.contractdesc,
-                        oldPrice, latestPrice, marketValue, unrealizedPnl, dailyPnl, pnlPercent
+                        oldPrice, latestPrice, marketValue, unrealizedPnl, dailyPnl, pnlPercent, priceChangePercent
                     });
 
                     if (dailyPnlByAccount.hasOwnProperty(accountId)) { dailyPnlByAccount[accountId] += dailyPnl; }
@@ -344,6 +410,15 @@
                     const pnlPercentCell = data.row.querySelector(`#pnlPercent-${data.row.dataset.conid}`);
                     pnlPercentCell.className = data.unrealizedPnl > 0.001 ? 'pnl-positive' : (data.unrealizedPnl < -0.001 ? 'pnl-negative' : '');
                     pnlPercentCell.textContent = data.pnlPercent.toFixed(2) + '%';
+
+                    const oldDailyPnl = parseFloat(data.row.querySelector(`#dailyPnl-${data.row.dataset.conid} .pnl-value`)?.textContent.replace(/,/g, '')) || 0;
+                    updatePnlCell(data.row.querySelector(`#dailyPnl-${data.row.dataset.conid}`), data.dailyPnl, oldDailyPnl);
+                    
+                    const priceChangePercentCell = data.row.querySelector(`#priceChangePercent-${data.row.dataset.conid}`);
+                    if (priceChangePercentCell) {
+                        priceChangePercentCell.className = data.dailyPnl > 0.001 ? 'pnl-positive' : (data.dailyPnl < -0.001 ? 'pnl-negative' : '');
+                        priceChangePercentCell.textContent = data.priceChangePercent.toFixed(2) + '%';
+                    }
                 });
 
                 for (const accountId in dailyPnlByAccount) {
@@ -391,15 +466,14 @@
                 }
                 
                 const activeAccountId = document.querySelector('.btn-account.active').dataset.targetAccount;
-                const chartPnlData = calculatedData
+                const chartDailyPnlData = calculatedData
                     .filter(pos => pos.accountId === activeAccountId)
                     .map(pos => ({
                         contractDesc: pos.contractDesc,
-                        unrealizedPnl: pos.unrealizedPnl
+                        dailyPnl: pos.dailyPnl
                     }));
                 
-                // 传递当前激活账户的历史记录给渲染函数
-                renderCharts(chartPnlData, netLiqHistory[activeAccountId] || []);
+                renderCharts(chartDailyPnlData, netLiqHistory[activeAccountId] || []);
 
                 document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
             }).catch(error => {
@@ -407,35 +481,32 @@
             });
     }
     
-    // *** 核心修改：图表渲染函数增加 history 参数 ***
-    function renderCharts(pnlData, history) {
-        // *** 核心修改：将稳定逻辑移到这里 ***
+    function renderCharts(dailyPnlData, history) {
         renderNetLiqHistoryChart(history); 
 
-        const sortedByAbsPnl = [...pnlData].sort((a, b) => Math.abs(b.unrealizedPnl) - Math.abs(a.unrealizedPnl));
-        const pnlChartData = sortedByAbsPnl.slice(0, 5);
-        renderPnlBarChart(pnlChartData);
+        const gainers = dailyPnlData.filter(p => p.dailyPnl > 0).sort((a, b) => b.dailyPnl - a.dailyPnl).slice(0, 5);
+        const losers = dailyPnlData.filter(p => p.dailyPnl < 0).sort((a, b) => a.dailyPnl - b.dailyPnl).slice(0, 5);
+
+        const finalChartData = [...gainers, ...losers];
+        
+        renderPnlBarChart(finalChartData);
     }
     
-    // *** 核心修改：净值图表渲染函数，实现预热逻辑 ***
     function renderNetLiqHistoryChart(history) {
         const ctx = document.getElementById('net-liq-history-chart');
         if (!ctx) return;
 
-        // 1. 如果历史记录点数不足，则不渲染或清空图表
         if (history.length <= CHART_WARMUP_UPDATES) {
             if (chartInstances.netLiq) {
                 chartInstances.netLiq.data.labels = [];
                 chartInstances.netLiq.data.datasets[0].data = [];
                 chartInstances.netLiq.update('none');
             }
-            return; // 提前退出，不执行渲染
+            return;
         }
 
-        // 2. 如果点数足够，则截取稳定后的数据用于显示
         const displayHistory = history.slice(CHART_WARMUP_UPDATES);
 
-        // 3. 使用稳定后的数据进行渲染
         if (chartInstances.netLiq) {
             chartInstances.netLiq.data.labels = displayHistory.map(p => p.time.toLocaleTimeString());
             chartInstances.netLiq.data.datasets[0].data = displayHistory.map(p => p.value);
@@ -451,19 +522,51 @@
                         borderColor: 'var(--primary-color)',
                         backgroundColor: 'rgba(0, 90, 156, 0.1)',
                         fill: true,
-                        tension: 0.2
+                        tension: 0.2,
+                        pointRadius: 0, 
+                        pointHoverRadius: 5
                     }]
                 },
                 options: {
-                    responsive: true, maintainAspectRatio: false,
+                    responsive: true, 
+                    maintainAspectRatio: false,
                     animation: {
-                        duration: 400 // 平滑动画
+                        duration: 400
                     },
-                    plugins: { legend: { display: false } },
                     scales: {
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxRotation: 0,
+                                minRotation: 0
+                            }
+                        },
                         y: { 
-                            grace: '5%', // 给Y轴顶部和底部留出5%的缓冲空间
-                            ticks: { callback: (value) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } 
+                            grace: '5%',
+                            ticks: { 
+                                callback: (value) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
+                            } 
+                        }
+                    },
+                    plugins: { 
+                        legend: { 
+                            display: false 
+                        },
+                        zoom: {
+                            pan: {
+                                enabled: true,
+                                mode: 'x',
+                                threshold: 5,
+                            },
+                            zoom: {
+                                wheel: {
+                                    enabled: true,
+                                },
+                                pinch: {
+                                    enabled: true
+                                },
+                                mode: 'x',
+                            }
                         }
                     }
                 }
@@ -476,8 +579,8 @@
         if (!ctx) return;
         
         const labels = data.map(p => p.contractDesc);
-        const values = data.map(p => p.unrealizedPnl);
-        const bgColors = data.map(p => p.unrealizedPnl >= 0 ? 'rgba(216, 0, 12, 0.7)' : 'rgba(45, 125, 50, 0.7)');
+        const values = data.map(p => p.dailyPnl);
+        const bgColors = data.map(p => p.dailyPnl >= 0 ? 'rgba(216, 0, 12, 0.7)' : 'rgba(45, 125, 50, 0.7)');
 
         if (chartInstances.pnl) {
             chartInstances.pnl.data.labels = labels;
@@ -490,7 +593,7 @@
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: '未实现盈亏', data: values,
+                        label: '当日盈亏', data: values,
                         backgroundColor: bgColors
                     }]
                 },
@@ -507,8 +610,8 @@
 
     function switchAccountView(targetAccountId) {
         document.getElementById('main-content-title').textContent = document.querySelector(`.btn-account[data-target-account="${targetAccountId}"]`).textContent;
-        document.querySelectorAll('.summary-grid').forEach(grid => grid.style.display = grid.id === `summary-view-${targetAccountId}` ? 'flex' : 'none');
-        document.querySelectorAll('.positions-section .account-card').forEach(card => card.style.display = (card.dataset.accountId === targetAccountId) ? 'block' : 'none');
+        document.querySelectorAll('.summary-grid').forEach(grid => grid.id === `summary-view-${targetAccountId}` ? grid.style.display = 'flex' : grid.style.display = 'none');
+        document.querySelectorAll('.positions-section .account-card').forEach(card => card.dataset.accountId === targetAccountId ? card.style.display = 'block' : card.style.display = 'none');
         document.querySelectorAll('.btn-account').forEach(button => button.classList.toggle('active', button.dataset.targetAccount === targetAccountId));
         
         if (chartInstances.netLiq) { chartInstances.netLiq.destroy(); chartInstances.netLiq = null; }
@@ -549,14 +652,12 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        // *** 修改：不再预加载初始净值到历史记录中 ***
         document.querySelectorAll('.summary-grid[id^="summary-view-"]').forEach(grid => {
             const accountId = grid.id.replace('summary-view-', '');
             accountDataStore[accountId] = {
                 cash: parseFloat(grid.dataset.cash) || 0,
                 currency: grid.dataset.currency || 'USD'
             };
-            // 初始化空的数组，等待预热
             netLiqHistory[accountId] = [];
         });
 
