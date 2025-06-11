@@ -1,4 +1,4 @@
-# app/main.py (最终版: 允许局域网访问，并手动打开浏览器)
+# app/main.py (最终版: 初始加载时预取所有数据)
 
 import requests
 import pandas as pd
@@ -10,6 +10,7 @@ import subprocess
 import time
 import platform
 import concurrent.futures
+import datetime
 
 # --- 应用程序配置 ---
 app = Flask(__name__)
@@ -22,6 +23,9 @@ app.template_folder = os.path.join(PROJECT_ROOT, 'templates')
 
 BASE_URL = "https://localhost:5000/v1/api/"
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+
+# 全局变量用于缓存历史表现数据
+performance_cache = {}
 
 
 # --- 核心功能函数 ---
@@ -107,52 +111,74 @@ def get_price_snapshots(conids):
     except requests.exceptions.RequestException:
         return {}
 
-def aggregate_portfolio_data(all_data):
-    """汇总所有账户的数据"""
-    aggregated_summary = {
-        'net_liquidation': 0, 'realized_pnl': 0, 'cash': 0,
-        'buying_power': 0, 'currency': 'USD' 
-    }
-    aggregated_positions = {}
-    if not all_data:
-        return {'summary': aggregated_summary, 'positions': []}
+def get_historical_performance(account_id):
+    """获取并计算账户基于时间加权回报率(TWR)的真实每日投资表现"""
+    global performance_cache
+    cache_duration_minutes = 15
 
-    for account_id, data in all_data.items():
-        if not data or not data.get('summary'): continue
+    if account_id in performance_cache:
+        cached_data = performance_cache[account_id]
+        time_since_cache = datetime.datetime.now() - cached_data['timestamp']
+        if time_since_cache < datetime.timedelta(minutes=cache_duration_minutes):
+            print(f"--> [Cache HIT] 返回账户 {account_id} 的历史表现缓存数据。")
+            return cached_data['data']
 
-        aggregated_summary['net_liquidation'] += data['summary']['net_liquidation']
-        aggregated_summary['realized_pnl'] += data['summary']['realized_pnl']
-        aggregated_summary['cash'] += data['summary']['cash']
-        aggregated_summary['buying_power'] += data['summary']['buying_power']
-        aggregated_summary['currency'] = data['summary']['currency']
+    print(f"--> [Cache MISS] 正在为账户 {account_id} 调用 /pa/performance API 获取TWR数据...")
 
-        for pos in data['positions']:
-            conid, position_size, cost_basis = pos['conid'], float(pos.get('position', 0)), float(pos.get('costBasis', 0))
-            if conid not in aggregated_positions:
-                aggregated_positions[conid] = pos.copy()
-                aggregated_positions[conid]['total_position'] = 0
-                aggregated_positions[conid]['total_costBasis'] = 0
-                aggregated_positions[conid]['holdings_breakdown'] = {}
-            
-            aggregated_positions[conid]['total_position'] += position_size
-            aggregated_positions[conid]['total_costBasis'] += cost_basis
-            aggregated_positions[conid]['holdings_breakdown'][account_id] = position_size
+    try:
+        endpoint_url = f"{BASE_URL}pa/performance"
+        payload = {'acctIds': [account_id]}
+        response = requests.post(endpoint_url, json=payload, verify=False, timeout=20)
+        response.raise_for_status()
+        data = response.json()
 
-    final_positions = []
-    for conid, pos in aggregated_positions.items():
-        total_pos, total_cb = pos['total_position'], pos['total_costBasis']
-        pos['position'], pos['costBasis'] = total_pos, total_cb
-        pos['avgCost'] = total_cb / total_pos if total_pos != 0 else 0
-        final_positions.append(pos)
-        
-    return {'summary': aggregated_summary, 'positions': final_positions}    
+        cps_data_root = data.get('cps', {})
+        account_data_node = cps_data_root.get('data', [{}])[0]
+        cumulative_returns = account_data_node.get('returns', [])
+        date_strings = cps_data_root.get('dates', [])
 
-def fetch_account_data(acc_id):
-    """获取并处理单个账户的摘要和持仓数据"""
-    print(f"--> 开始获取账户 {acc_id} 的数据...")
-    summary_raw = get_account_summary(acc_id)
-    positions_raw = get_account_positions(acc_id)
+        if not cumulative_returns or not date_strings or len(cumulative_returns) != len(date_strings):
+            raise ValueError("API响应中CPS或日期数据不完整或不匹配。")
+
+        daily_twr_list = []
+        sorted_returns = sorted(zip(date_strings, cumulative_returns))
+
+        for i in range(1, len(sorted_returns)):
+            current_date, cumulative_today = sorted_returns[i]
+            _, cumulative_yesterday = sorted_returns[i-1]
+            daily_twr = (1 + cumulative_today) / (1 + cumulative_yesterday) - 1
+            daily_twr_list.append({'date': current_date, 'twr': daily_twr})
+
+        performance_cache[account_id] = {'timestamp': datetime.datetime.now(), 'data': daily_twr_list}
+        print(f"<-- 完成获取和处理账户 {account_id} 的每日TWR数据。")
+        return daily_twr_list
+    except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as e:
+        print(f"!!! 获取或处理账户 {account_id} 的历史表现数据时出错: {e}")
+        return None
+
+# main.py
+
+def fetch_all_data_for_account(acc_id):
+    """获取并处理单个账户的摘要、持仓和历史表现数据"""
     
+    # --- 新增的防御性检查 ---
+    if not acc_id or not acc_id.strip():
+        print(f"!!! 检测到无效的账户ID，已跳过。ID: '{acc_id}'")
+        # 返回一个空的数据结构，以避免下游函数出错
+        return acc_id, {'summary': {}, 'positions': [], 'performance': None}
+    # --- 检查结束 ---
+
+    print(f"--> 开始并行获取账户 {acc_id} 的所有数据...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_summary = executor.submit(get_account_summary, acc_id)
+        future_positions = executor.submit(get_account_positions, acc_id)
+        future_performance = executor.submit(get_historical_performance, acc_id)
+
+        summary_raw = future_summary.result()
+        positions_raw = future_positions.result()
+        performance_data = future_performance.result()
+
     processed_positions = []
     if isinstance(positions_raw, list):
         for p in positions_raw:
@@ -175,12 +201,79 @@ def fetch_account_data(acc_id):
     summary_data['currency'] = summary_raw.get('netliquidation', {}).get('currency', 'USD')
     
     print(f"<-- 完成获取账户 {acc_id} 的数据。")
-    return acc_id, {'summary': summary_data, 'positions': processed_positions}
+    return acc_id, {'summary': summary_data, 'positions': processed_positions, 'performance': performance_data}
+    """获取并处理单个账户的摘要、持仓和历史表现数据"""
+    print(f"--> 开始并行获取账户 {acc_id} 的所有数据...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_summary = executor.submit(get_account_summary, acc_id)
+        future_positions = executor.submit(get_account_positions, acc_id)
+        future_performance = executor.submit(get_historical_performance, acc_id)
+
+        summary_raw = future_summary.result()
+        positions_raw = future_positions.result()
+        performance_data = future_performance.result()
+
+    processed_positions = []
+    if isinstance(positions_raw, list):
+        for p in positions_raw:
+            try:
+                p['costBasis'] = float(p.get('position', 0)) * float(p.get('avgCost', 0))
+                processed_positions.append(p)
+            except (ValueError, TypeError):
+                p['costBasis'] = 0
+                processed_positions.append(p)
+
+    summary_data = {
+        key: float(summary_raw.get(val, {}).get('amount', 0)) 
+        for key, val in [
+            ('net_liquidation', 'netliquidation'), 
+            ('realized_pnl', 'realizedpnl'), 
+            ('cash', 'cashbalance'), 
+            ('buying_power', 'buyingpower')
+        ]
+    }
+    summary_data['currency'] = summary_raw.get('netliquidation', {}).get('currency', 'USD')
+    
+    print(f"<-- 完成获取账户 {acc_id} 的数据。")
+    return acc_id, {'summary': summary_data, 'positions': processed_positions, 'performance': performance_data}
+
+def aggregate_portfolio_data(all_data):
+    """汇总所有账户的数据"""
+    aggregated_summary = {'net_liquidation': 0, 'realized_pnl': 0, 'cash': 0, 'buying_power': 0, 'currency': 'USD'}
+    aggregated_positions = {}
+    if not all_data: return {'summary': aggregated_summary, 'positions': []}
+
+    for account_id, data in all_data.items():
+        if not data or not data.get('summary'): continue
+        for key in ['net_liquidation', 'realized_pnl', 'cash', 'buying_power']:
+            aggregated_summary[key] += data['summary'].get(key, 0)
+        aggregated_summary['currency'] = data['summary'].get('currency', 'USD')
+
+        for pos in data.get('positions', []):
+            conid, position_size, cost_basis = pos['conid'], float(pos.get('position', 0)), float(pos.get('costBasis', 0))
+            if conid not in aggregated_positions:
+                aggregated_positions[conid] = pos.copy()
+                aggregated_positions[conid]['total_position'] = 0
+                aggregated_positions[conid]['total_costBasis'] = 0
+                aggregated_positions[conid]['holdings_breakdown'] = {}
+            
+            aggregated_positions[conid]['total_position'] += position_size
+            aggregated_positions[conid]['total_costBasis'] += cost_basis
+            aggregated_positions[conid]['holdings_breakdown'][account_id] = position_size
+
+    final_positions = []
+    for conid, pos in aggregated_positions.items():
+        total_pos, total_cb = pos['total_position'], pos['total_costBasis']
+        pos['position'], pos['costBasis'] = total_pos, total_cb
+        pos['avgCost'] = total_cb / total_pos if total_pos != 0 else 0
+        final_positions.append(pos)
+        
+    return {'summary': aggregated_summary, 'positions': final_positions}
 
 # --- Flask 路由 ---
 @app.route('/favicon.ico')
 def favicon():
-    """处理浏览器对favicon.ico的请求，避免404错误"""
     return Response(status=204)
 
 @app.route('/')
@@ -195,31 +288,38 @@ def home():
         return render_template('login.html', error="获取账户信息失败，请在弹窗中重新登录。")
 
     all_data = {}
+    historical_data = {}
+
     max_workers = min(len(account_ids), 10)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_account = {executor.submit(fetch_account_data, acc_id): acc_id for acc_id in account_ids}
+        future_to_account = {executor.submit(fetch_all_data_for_account, acc_id): acc_id for acc_id in account_ids}
         for future in concurrent.futures.as_completed(future_to_account):
             acc_id = future_to_account[future]
             try:
                 _, data = future.result()
+                historical_data[acc_id] = data.pop('performance', None)
                 all_data[acc_id] = data
             except Exception as exc:
                 print(f"!!! 获取账户 {acc_id} 数据时产生异常: {exc}")
                 all_data[acc_id] = None
+                historical_data[acc_id] = None
     
     aggregated_data = aggregate_portfolio_data(all_data)
     
     end_time = time.time()
     print(f"--- ✅ 所有数据加载完毕，总耗时: {end_time - start_time:.2f} 秒 ---")
     
-    return render_template('index.html', all_data=all_data, aggregated_data=aggregated_data)
+    historical_data_json = json.dumps(historical_data)
+    return render_template('index.html', 
+                           all_data=all_data, 
+                           aggregated_data=aggregated_data,
+                           historical_data_json=historical_data_json)
 
 @app.route('/api/prices')
 def api_prices():
     """提供给前端的API，用于动态获取价格"""
     conids_str = flask_request.args.get('conids', '')
-    if not conids_str: 
-        return jsonify({})
+    if not conids_str: return jsonify({})
         
     conids = conids_str.split(',')
     raw_price_data = get_price_snapshots(conids)
@@ -230,42 +330,29 @@ def api_prices():
         if data:
             price = data.get('31', 'N/A')
             is_closing_price = isinstance(price, str) and price.startswith('C')
-            price_dict[conid] = {
-                'price': price[1:] if is_closing_price else price,
-                'change': data.get('83', 'N/A'),
-                'is_close': is_closing_price
-            }
+            price_dict[conid] = {'price': price[1:] if is_closing_price else price, 'change': data.get('83', 'N/A')}
     return jsonify(price_dict)
 
 @app.route('/login')
 def login_page():
     """登录页面，如果已认证则直接跳转主页"""
-    print(">>> 正在检查网关认证状态...")
     if is_gateway_running():
-        print(">>> ✅ 网关已认证，直接跳转至主仪表盘。")
         return redirect(url_for('home'))
-    else:
-        print(">>> ⚠️ 网关未认证，显示登录页面。")
-        return render_template('login.html')
+    return render_template('login.html')
 
 @app.route('/api/check_auth')
 def check_auth_status():
     """提供给前端的API，用于轮询认证状态"""
-    if is_gateway_running():
-        return jsonify({'status': 'success'})
-    else:
-        return jsonify({'status': 'pending'})
+    return jsonify({'status': 'success' if is_gateway_running() else 'pending'})
 
 # --- 主程序入口 ---
 if __name__ == '__main__':
-    print("="*40)
-    print(" 启动 IBKR 实时报告应用 ".center(40, "="))
-    print("="*40)
+    print("="*40 + "\n" + " 启动 IBKR 实时报告应用 ".center(40, "=") + "\n" + "="*40)
     
     if not is_gateway_running():
         start_gateway()
         print(">>> 等待网关初始化 (约10-15秒)...")
-        time.sleep(10)
+        time.sleep(15)
 
     print("\n>>> ✅ Flask Web 服务器已成功启动。")
     print(">>> ➡️  请在浏览器中手动访问以下地址:")
@@ -273,8 +360,6 @@ if __name__ == '__main__':
     print(">>>    - 局域网访问: http://<您电脑的IP地址>:8000/login")
     
     try:
-        # --- 主要改动在这里：将 host 设置为 '0.0.0.0' ---
         app.run(host='0.0.0.0', port=8000, debug=False)
     except OSError as e:
-        print(f"!!! 启动 Web 服务器失败: {e}")
-        print("!!! 端口 8000 可能已被占用。")
+        print(f"!!! 启动 Web 服务器失败: {e}\n!!! 端口 8000 可能已被占用。")

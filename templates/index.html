@@ -96,10 +96,36 @@
         margin: 0;
         color: #111;
     }
+    .main-header .controls {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }
     .main-header .timestamp {
         font-size: 1rem;
         color: #666;
     }
+    .header-btn {
+        padding: 8px 16px;
+        font-size: 14px;
+        border: 1px solid var(--primary-color);
+        background-color: white;
+        color: var(--primary-color);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease-in-out;
+        white-space: nowrap;
+    }
+    .header-btn:hover {
+        background-color: var(--primary-color);
+        color: white;
+    }
+    .header-btn.frozen {
+        background-color: var(--secondary-color);
+        border-color: var(--secondary-color);
+        color: white;
+    }
+
 
     /* --- 可视化与表格 --- */
     .charts-grid {
@@ -151,20 +177,28 @@
     th[data-sortable="true"]:not([data-sort-direction])::after { content: ' \2195'; margin-top: -12px; }
     th[data-sortable="true"][data-sort-direction="asc"]::after { border-bottom: 6px solid #333; opacity: 1; }
     th[data-sortable="true"][data-sort-direction="desc"]::after { border-top: 6px solid #333; opacity: 1; }
+    
+    /* 单元格内数值跳动动画 */
     @keyframes highlight-red-fade {
         from { background-color: rgba(216, 0, 12, 0.3); }
         to { background-color: transparent; }
     }
-    .highlight-up {
-        animation: highlight-red-fade 1.5s ease-out;
-    }
+    .highlight-up { animation: highlight-red-fade 1.5s ease-out; }
     @keyframes highlight-green-fade {
         from { background-color: rgba(45, 125, 50, 0.3); }
         to { background-color: transparent; }
     }
-    .highlight-down {
-        animation: highlight-green-fade 1.5s ease-out;
+    .highlight-down { animation: highlight-green-fade 1.5s ease-out; }
+
+    /* 整行闪烁动画 */
+    @keyframes highlight-row-fade {
+        from { background-color: rgba(255, 229, 100, 0.4); } /* 修改为中性的黄色高亮 */
+        to { background-color: transparent; }
     }
+    .row-highlight {
+        animation: highlight-row-fade 1.5s ease-out;
+    }
+
 
     /* --- 响应式设计核心 --- */
     @media (max-width: 1024px) {
@@ -196,7 +230,7 @@
         .main-header {
             flex-direction: column;
             align-items: flex-start;
-            gap: 8px;
+            gap: 12px;
         }
         .main-header h2 { font-size: 1.8rem; }
     }
@@ -241,7 +275,10 @@
     <div class="main-content">
         <div class="main-header">
             <h2 id="main-content-title">所有账户 (聚合视图)</h2>
-            <p class="timestamp">上次更新: <span id="last-updated">--:--:--</span></p>
+            <div class="controls">
+                <button id="freeze-btn" class="header-btn"><i class="fas fa-pause"></i> 冻结界面</button>
+                <p class="timestamp">上次更新: <span id="last-updated">--:--:--</span></p>
+            </div>
         </div>
         <div class="charts-grid">
             <div class="chart-card">
@@ -251,6 +288,10 @@
             <div class="chart-card">
                 <h4><i class="fas fa-chart-bar"></i> 当日盈亏排行 Top 5</h4>
                 <canvas id="pnl-barchart"></canvas>
+            </div>
+            <div class="chart-card" id="historical-pnl-card" style="display: none;">
+                <h4><i class="fas fa-chart-simple"></i> 调整后每日回报率 (TWR)</h4>
+                <canvas id="historical-pnl-chart"></canvas>
             </div>
         </div>
         <div class="positions-section">
@@ -292,9 +333,13 @@
 {# --- 页面专属的 JavaScript --- #}
 {% block scripts %}
 <script>
+    // 接收从后端预加载的所有账户的历史数据
+    const preloadedHistoricalData = {{ historical_data_json|safe }};
+
     const UPDATE_INTERVAL_MS = 3000;
     const CHART_WARMUP_UPDATES = 2;
 
+    let isUiFrozen = false; 
     let chartInstances = {};
     let netLiqHistory = {};
     const MAX_HISTORY_POINTS = 300;
@@ -313,8 +358,9 @@
         const startVal = (isNaN(currentValNumeric) || start === end) ? start : currentValNumeric;
         
         if (startVal === end) {
-            target.textContent = end.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if(suffix) element.innerHTML = target.textContent + suffix;
+            let formattedEnd = end.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            let content = suffix ? formattedEnd + " " + suffix : formattedEnd;
+            if (element.innerHTML !== content) element.innerHTML = content;
             return;
         };
 
@@ -334,9 +380,11 @@
             if (!startTime) startTime = timestamp;
             const progress = Math.min((timestamp - startTime) / duration, 1);
             const currentAnimatedVal = startVal + progress * range;
-            target.textContent = currentAnimatedVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            if(suffix) {
-                 element.innerHTML = target.textContent + " " + suffix;
+            let formattedVal = currentAnimatedVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+             if(suffix) {
+                 element.innerHTML = formattedVal + " " + suffix;
+            } else {
+                target.textContent = formattedVal;
             }
             if (progress < 1) {
                 window.requestAnimationFrame(step);
@@ -352,14 +400,36 @@
         else if (pnlValue < -0.001) { cell.className = 'pnl-negative'; pnlIcon = '<i class="fas fa-arrow-down pnl-icon"></i>'; } 
         else { cell.className = ''; pnlIcon = '<i class="fas fa-minus pnl-icon"></i>'; }
         
-        const valueSpan = cell.querySelector('.pnl-value') || document.createElement('span');
-        valueSpan.className = 'pnl-value';
+        let valueSpan = cell.querySelector('.pnl-value');
+        if (!valueSpan) {
+            valueSpan = document.createElement('span');
+            valueSpan.className = 'pnl-value';
+            cell.innerHTML = pnlIcon; 
+            cell.appendChild(valueSpan);
+        } else {
+            cell.firstChild.outerHTML = pnlIcon; 
+        }
         
         const startValue = oldPnlValue !== undefined ? oldPnlValue : pnlValue;
         animateValue(valueSpan, startValue, pnlValue, 500);
+    }
 
-        cell.innerHTML = pnlIcon;
-        cell.appendChild(valueSpan);
+    function updatePercentageCell(cell, value) {
+        if (!cell) return;
+        let icon = '';
+        let className = '';
+        if (value > 0.001) {
+            className = 'pnl-positive';
+            icon = '<i class="fas fa-arrow-up pnl-icon"></i> ';
+        } else if (value < -0.001) {
+            className = 'pnl-negative';
+            icon = '<i class="fas fa-arrow-down pnl-icon"></i> ';
+        } else {
+            className = '';
+            icon = '<i class="fas fa-minus pnl-icon"></i> ';
+        }
+        cell.className = className;
+        cell.innerHTML = icon + value.toFixed(2) + '%';
     }
     
     function updatePrices() {
@@ -391,34 +461,37 @@
                     const accountId = row.closest('.account-card').dataset.accountId;
 
                     calculatedData.push({
-                        row, accountId, contractDesc: row.dataset.contractdesc,
-                        oldPrice, latestPrice, marketValue, unrealizedPnl, dailyPnl, pnlPercent, priceChangePercent
+                        row, accountId, conid, contractDesc: row.dataset.contractdesc,
+                        latestPrice, marketValue, unrealizedPnl, dailyPnl,
+                        pnlPercent, priceChangePercent
                     });
 
                     if (dailyPnlByAccount.hasOwnProperty(accountId)) { dailyPnlByAccount[accountId] += dailyPnl; }
                     if (accountId !== 'all') { dailyPnlByAccount['all'] += dailyPnl; }
                 });
 
+                if (isUiFrozen) {
+                    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString() + " (已冻结)";
+                    return;
+                }
+                
                 calculatedData.forEach(data => {
-                    const oldMarketValue = parseFloat(data.row.querySelector(`#marketValue-${data.row.dataset.conid}`).textContent.replace(/,/g, '')) || 0;
-                    const oldPnl = parseFloat(data.row.querySelector(`#pnl-${data.row.dataset.conid} .pnl-value`)?.textContent.replace(/,/g, '')) || 0;
-
-                    animateValue(data.row.querySelector(`#price-${data.row.dataset.conid}`), data.oldPrice, data.latestPrice, 500);
-                    animateValue(data.row.querySelector(`#marketValue-${data.row.dataset.conid}`), oldMarketValue, data.marketValue, 500);
-                    updatePnlCell(data.row.querySelector(`#pnl-${data.row.dataset.conid}`), data.unrealizedPnl, oldPnl);
-                    
-                    const pnlPercentCell = data.row.querySelector(`#pnlPercent-${data.row.dataset.conid}`);
-                    pnlPercentCell.className = data.unrealizedPnl > 0.001 ? 'pnl-positive' : (data.unrealizedPnl < -0.001 ? 'pnl-negative' : '');
-                    pnlPercentCell.textContent = data.pnlPercent.toFixed(2) + '%';
-
-                    const oldDailyPnl = parseFloat(data.row.querySelector(`#dailyPnl-${data.row.dataset.conid} .pnl-value`)?.textContent.replace(/,/g, '')) || 0;
-                    updatePnlCell(data.row.querySelector(`#dailyPnl-${data.row.dataset.conid}`), data.dailyPnl, oldDailyPnl);
-                    
-                    const priceChangePercentCell = data.row.querySelector(`#priceChangePercent-${data.row.dataset.conid}`);
-                    if (priceChangePercentCell) {
-                        priceChangePercentCell.className = data.dailyPnl > 0.001 ? 'pnl-positive' : (data.dailyPnl < -0.001 ? 'pnl-negative' : '');
-                        priceChangePercentCell.textContent = data.priceChangePercent.toFixed(2) + '%';
+                    const oldPrice = parseFloat(data.row.querySelector(`#price-${data.conid}`).textContent.replace(/,/g, '')) || 0;
+                    if (Math.abs(data.latestPrice - oldPrice) > 0.001) {
+                        data.row.classList.add('row-highlight');
+                        setTimeout(() => data.row.classList.remove('row-highlight'), 1500);
                     }
+                    
+                    animateValue(data.row.querySelector(`#price-${data.conid}`), oldPrice, data.latestPrice, 500);
+                    const oldMarketValue = parseFloat(data.row.querySelector(`#marketValue-${data.conid}`).textContent.replace(/,/g, '')) || 0;
+                    animateValue(data.row.querySelector(`#marketValue-${data.conid}`), oldMarketValue, data.marketValue, 500);
+                    const oldPnl = parseFloat(data.row.querySelector(`#pnl-${data.conid} .pnl-value`)?.textContent.replace(/,/g, '')) || undefined;
+                    updatePnlCell(data.row.querySelector(`#pnl-${data.conid}`), data.unrealizedPnl, oldPnl);
+                    updatePercentageCell(data.row.querySelector(`#pnlPercent-${data.conid}`), data.pnlPercent);
+                    const priceChangePercentCell = data.row.querySelector(`#priceChangePercent-${data.conid}`);
+                    if (priceChangePercentCell) updatePercentageCell(priceChangePercentCell, data.priceChangePercent);
+                    const oldDailyPnl = parseFloat(data.row.querySelector(`#dailyPnl-${data.conid} .pnl-value`)?.textContent.replace(/,/g, '')) || undefined;
+                    updatePnlCell(data.row.querySelector(`#dailyPnl-${data.conid}`), data.dailyPnl, oldDailyPnl);
                 });
 
                 for (const accountId in dailyPnlByAccount) {
@@ -426,37 +499,26 @@
                     if (pnlSummaryCell) {
                         const oldPnl = parseFloat(pnlSummaryCell.textContent.replace(/,/g, '')) || 0;
                         animateValue(pnlSummaryCell, oldPnl, dailyPnlByAccount[accountId], 500);
-                        pnlSummaryCell.className = dailyPnlByAccount[accountId] > 0.001 ? 'summary-value pnl-positive' : (dailyPnlByAccount[accountId] < -0.001 ? 'summary-value pnl-negative' : 'summary-value');
+                        pnlSummaryCell.className = `summary-value ${dailyPnlByAccount[accountId] > 0.001 ? 'pnl-positive' : (dailyPnlByAccount[accountId] < -0.001 ? 'pnl-negative' : '')}`;
                     }
                 }
                 
-                const newMarketValuesByAccount = {};
-                Object.keys(accountDataStore).forEach(accId => newMarketValuesByAccount[accId] = 0);
-
+                let newMarketValuesByAccount = Object.keys(accountDataStore).reduce((acc, accId) => ({...acc, [accId]: 0}), {});
                 calculatedData.forEach(pos => {
                     if (pos.accountId !== 'all' && newMarketValuesByAccount.hasOwnProperty(pos.accountId)) {
                         newMarketValuesByAccount[pos.accountId] += pos.marketValue;
                     }
                 });
-                
-                let totalMarketValueForAll = 0;
-                for (const accId in newMarketValuesByAccount) {
-                    if (accId !== 'all') {
-                        totalMarketValueForAll += newMarketValuesByAccount[accId];
-                    }
-                }
-                newMarketValuesByAccount['all'] = totalMarketValueForAll;
+                newMarketValuesByAccount['all'] = Object.values(newMarketValuesByAccount).reduce((sum, val) => sum + val, 0);
                 
                 for (const accountId in newMarketValuesByAccount) {
-                    const cash = accountDataStore[accountId].cash || 0;
-                    const currency = accountDataStore[accountId].currency || 'USD';
+                    const cash = accountDataStore[accountId]?.cash || 0;
+                    const currency = accountDataStore[accountId]?.currency || 'USD';
                     const currentNetLiq = newMarketValuesByAccount[accountId] + cash;
                     
                     if (!netLiqHistory[accountId]) netLiqHistory[accountId] = [];
                     netLiqHistory[accountId].push({ time: new Date(), value: currentNetLiq });
-                    if (netLiqHistory[accountId].length > MAX_HISTORY_POINTS) {
-                        netLiqHistory[accountId].shift();
-                    }
+                    if (netLiqHistory[accountId].length > MAX_HISTORY_POINTS) netLiqHistory[accountId].shift();
                     
                     const summaryValueEl = document.querySelector(`#summary-view-${accountId} .summary-item:first-child .summary-value`);
                     if(summaryValueEl) {
@@ -466,47 +528,26 @@
                 }
                 
                 const activeAccountId = document.querySelector('.btn-account.active').dataset.targetAccount;
-                const chartDailyPnlData = calculatedData
-                    .filter(pos => pos.accountId === activeAccountId)
-                    .map(pos => ({
-                        contractDesc: pos.contractDesc,
-                        dailyPnl: pos.dailyPnl
-                    }));
-                
-                renderCharts(chartDailyPnlData, netLiqHistory[activeAccountId] || []);
-
+                renderCharts(
+                    calculatedData.filter(pos => pos.accountId === activeAccountId), 
+                    netLiqHistory[activeAccountId] || []
+                );
                 document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
-            }).catch(error => {
-                console.error('更新价格失败:', error);
-            });
+            }).catch(error => console.error('更新价格失败:', error));
     }
     
     function renderCharts(dailyPnlData, history) {
         renderNetLiqHistoryChart(history); 
-
-        const gainers = dailyPnlData.filter(p => p.dailyPnl > 0).sort((a, b) => b.dailyPnl - a.dailyPnl).slice(0, 5);
-        const losers = dailyPnlData.filter(p => p.dailyPnl < 0).sort((a, b) => a.dailyPnl - b.dailyPnl).slice(0, 5);
-
-        const finalChartData = [...gainers, ...losers];
-        
-        renderPnlBarChart(finalChartData);
+        renderPnlBarChart(dailyPnlData);
     }
     
     function renderNetLiqHistoryChart(history) {
-        const ctx = document.getElementById('net-liq-history-chart');
-        if (!ctx) return;
-
+        const ctx = document.getElementById('net-liq-history-chart').getContext('2d');
         if (history.length <= CHART_WARMUP_UPDATES) {
-            if (chartInstances.netLiq) {
-                chartInstances.netLiq.data.labels = [];
-                chartInstances.netLiq.data.datasets[0].data = [];
-                chartInstances.netLiq.update('none');
-            }
+            if (chartInstances.netLiq) { chartInstances.netLiq.data.datasets[0].data = []; chartInstances.netLiq.update('none'); }
             return;
         }
-
         const displayHistory = history.slice(CHART_WARMUP_UPDATES);
-
         if (chartInstances.netLiq) {
             chartInstances.netLiq.data.labels = displayHistory.map(p => p.time.toLocaleTimeString());
             chartInstances.netLiq.data.datasets[0].data = displayHistory.map(p => p.value);
@@ -515,72 +556,31 @@
             chartInstances.netLiq = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: displayHistory.map(p => p.time.toLocaleTimeString()),
                     datasets: [{
                         label: '净清算价值',
-                        data: displayHistory.map(p => p.value),
                         borderColor: 'var(--primary-color)',
                         backgroundColor: 'rgba(0, 90, 156, 0.1)',
-                        fill: true,
-                        tension: 0.2,
-                        pointRadius: 0, 
-                        pointHoverRadius: 5
+                        fill: true, tension: 0.2, pointRadius: 0
                     }]
                 },
                 options: {
-                    responsive: true, 
-                    maintainAspectRatio: false,
-                    animation: {
-                        duration: 400
-                    },
-                    scales: {
-                        x: {
-                            ticks: {
-                                autoSkip: true,
-                                maxRotation: 0,
-                                minRotation: 0
-                            }
-                        },
-                        y: { 
-                            grace: '5%',
-                            ticks: { 
-                                callback: (value) => value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) 
-                            } 
-                        }
-                    },
-                    plugins: { 
-                        legend: { 
-                            display: false 
-                        },
-                        zoom: {
-                            pan: {
-                                enabled: true,
-                                mode: 'x',
-                                threshold: 5,
-                            },
-                            zoom: {
-                                wheel: {
-                                    enabled: true,
-                                },
-                                pinch: {
-                                    enabled: true
-                                },
-                                mode: 'x',
-                            }
-                        }
-                    }
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { grace: '5%' } },
+                    plugins: { legend: { display: false }, zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } } }
                 }
             });
         }
     }
 
     function renderPnlBarChart(data) {
-        const ctx = document.getElementById('pnl-barchart');
-        if (!ctx) return;
-        
-        const labels = data.map(p => p.contractDesc);
-        const values = data.map(p => p.dailyPnl);
-        const bgColors = data.map(p => p.dailyPnl >= 0 ? 'rgba(216, 0, 12, 0.7)' : 'rgba(45, 125, 50, 0.7)');
+        const ctx = document.getElementById('pnl-barchart').getContext('2d');
+        const sortedData = [...data].sort((a, b) => a.dailyPnl - b.dailyPnl);
+        const losers = sortedData.filter(p => p.dailyPnl < 0).slice(0, 5);
+        const gainers = sortedData.filter(p => p.dailyPnl > 0).reverse().slice(0, 5);
+        const finalChartData = [...gainers, ...losers];
+        const labels = finalChartData.map(p => p.contractDesc);
+        const values = finalChartData.map(p => p.dailyPnl);
+        const bgColors = finalChartData.map(p => p.dailyPnl >= 0 ? 'rgba(216, 0, 12, 0.7)' : 'rgba(45, 125, 50, 0.7)');
 
         if (chartInstances.pnl) {
             chartInstances.pnl.data.labels = labels;
@@ -590,19 +590,43 @@
         } else {
             chartInstances.pnl = new Chart(ctx, {
                 type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: '当日盈亏', data: values,
-                        backgroundColor: bgColors
-                    }]
-                },
+                data: { labels, datasets: [{ label: '当日盈亏', data: values, backgroundColor: bgColors }] },
                 options: { 
-                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, 
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: {
-                         x: { ticks: { color: (c) => c.tick.value >= 0 ? '#D8000C' : '#2E7D32' }}
-                    }
+                    scales: { x: { ticks: { color: c => c.tick.value >= 0 ? '#D8000C' : '#2E7D32' } } }
+                }
+            });
+        }
+    }
+
+    function renderHistoricalPnlChart(data) {
+        const historicalCard = document.getElementById('historical-pnl-card');
+        const ctx = document.getElementById('historical-pnl-chart').getContext('2d');
+        if (!data || data.length === 0) { historicalCard.style.display = 'none'; return; }
+        
+        historicalCard.style.display = 'block';
+        const labels = data.map(d => d.date);
+        const values = data.map(d => d.twr);
+        const bgColors = data.map(d => d.twr >= 0 ? 'rgba(216, 0, 12, 0.7)' : 'rgba(45, 125, 50, 0.7)');
+
+        if (chartInstances.historicalPnl) {
+            chartInstances.historicalPnl.data.labels = labels;
+            chartInstances.historicalPnl.data.datasets[0].data = values;
+            chartInstances.historicalPnl.data.datasets[0].backgroundColor = bgColors;
+            chartInstances.historicalPnl.update('none');
+        } else {
+            chartInstances.historicalPnl = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: '每日回报率 (TWR)', data: values, backgroundColor: bgColors }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        zoom: { pan: { enabled: true, mode: 'x' }, zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' } },
+                        tooltip: { callbacks: { label: c => `${c.dataset.label || ''}: ${(c.parsed.y * 100).toFixed(2)}%` } }
+                    },
+                    scales: { y: { ticks: { callback: v => `${(v * 100).toFixed(1)}%` } } }
                 }
             });
         }
@@ -610,48 +634,61 @@
 
     function switchAccountView(targetAccountId) {
         document.getElementById('main-content-title').textContent = document.querySelector(`.btn-account[data-target-account="${targetAccountId}"]`).textContent;
-        document.querySelectorAll('.summary-grid').forEach(grid => grid.id === `summary-view-${targetAccountId}` ? grid.style.display = 'flex' : grid.style.display = 'none');
-        document.querySelectorAll('.positions-section .account-card').forEach(card => card.dataset.accountId === targetAccountId ? card.style.display = 'block' : card.style.display = 'none');
+        document.querySelectorAll('.summary-grid').forEach(grid => grid.style.display = (grid.id === `summary-view-${targetAccountId}` ? 'flex' : 'none'));
+        document.querySelectorAll('.positions-section .account-card').forEach(card => card.style.display = (card.dataset.accountId === targetAccountId ? 'block' : 'none'));
         document.querySelectorAll('.btn-account').forEach(button => button.classList.toggle('active', button.dataset.targetAccount === targetAccountId));
         
-        if (chartInstances.netLiq) { chartInstances.netLiq.destroy(); chartInstances.netLiq = null; }
-        if (chartInstances.pnl) { chartInstances.pnl.destroy(); chartInstances.pnl = null; }
+        Object.values(chartInstances).forEach(chart => chart?.destroy());
+        chartInstances = {};
         
+        const historicalCard = document.getElementById('historical-pnl-card');
+        if (targetAccountId === 'all') {
+            historicalCard.style.display = 'none';
+        } else {
+            const historicalData = preloadedHistoricalData[targetAccountId];
+            if (historicalData) {
+                renderHistoricalPnlChart(historicalData);
+            } else {
+                console.error(`没有找到账户 ${targetAccountId} 的预加载历史数据。`);
+                historicalCard.style.display = 'none';
+            }
+        }
         updatePrices();
     }
     
     function makeTablesSortable() {
         document.querySelectorAll('.sortable-table').forEach(table => {
-            let headers = table.querySelectorAll('th[data-sortable="true"]');
-            headers.forEach((header, index) => header.addEventListener('click', () => sortColumn(table, index)));
+            table.querySelectorAll('th[data-sortable="true"]').forEach((header, index) => {
+                header.addEventListener('click', () => sortColumn(table, index));
+            });
         });
     }
 
     function sortColumn(table, columnIndex) {
         const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        const header = table.querySelector(`thead th:nth-child(${columnIndex + 1})`);
+        const rows = Array.from(tbody.rows);
+        const header = table.tHead.rows[0].cells[columnIndex];
         const type = header.dataset.type;
         const currentDirection = header.dataset.sortDirection || 'desc';
         const newDirection = currentDirection === 'desc' ? 'asc' : 'desc';
+        
         table.querySelectorAll('th[data-sortable="true"]').forEach(h => h.removeAttribute('data-sort-direction'));
         header.dataset.sortDirection = newDirection;
-        const sortedRows = rows.sort((a, b) => {
-            const cellA = a.querySelector(`td:nth-child(${columnIndex + 1})`).textContent.trim();
-            const cellB = b.querySelector(`td:nth-child(${columnIndex + 1})`).textContent.trim();
-            let valA, valB;
-            if (type === 'numeric') {
-                valA = parseFloat(cellA.replace(/[,%$]/g, '')) || -Infinity;
-                valB = parseFloat(cellB.replace(/[,%$]/g, '')) || -Infinity;
-            } else { valA = cellA; valB = cellB; }
+
+        rows.sort((a, b) => {
+            const cellA = a.cells[columnIndex].textContent.trim();
+            const cellB = b.cells[columnIndex].textContent.trim();
+            let valA = type === 'numeric' ? parseFloat(cellA.replace(/[,%$]/g, '')) || -Infinity : cellA;
+            let valB = type === 'numeric' ? parseFloat(cellB.replace(/[,%$]/g, '')) || -Infinity : cellB;
             if (valA > valB) return 1; if (valA < valB) return -1; return 0;
         });
-        if (newDirection === 'desc') sortedRows.reverse();
-        tbody.innerHTML = '';
-        sortedRows.forEach(row => tbody.appendChild(row));
+
+        if (newDirection === 'desc') rows.reverse();
+        rows.forEach(row => tbody.appendChild(row));
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+
         document.querySelectorAll('.summary-grid[id^="summary-view-"]').forEach(grid => {
             const accountId = grid.id.replace('summary-view-', '');
             accountDataStore[accountId] = {
@@ -663,6 +700,17 @@
 
         document.querySelectorAll('.btn-account').forEach(button => {
             button.addEventListener('click', (event) => switchAccountView(event.currentTarget.dataset.targetAccount));
+        });
+
+        const freezeBtn = document.getElementById('freeze-btn');
+        freezeBtn.addEventListener('click', () => {
+            isUiFrozen = !isUiFrozen;
+            freezeBtn.innerHTML = isUiFrozen ? '<i class="fas fa-play"></i> 恢复更新' : '<i class="fas fa-pause"></i> 冻结界面';
+            freezeBtn.classList.toggle('frozen', isUiFrozen);
+            if (!isUiFrozen) {
+                console.log('UI un-frozen. Performing immediate update.');
+                updatePrices(); 
+            }
         });
         
         makeTablesSortable();
