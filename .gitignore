@@ -1,2 +1,22 @@
 /clientportal.gw/
 Realized_PL_Report.xml
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+instance/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# IBKR Gateway generated files
+vendor/clientportal.gw/logs/
+vendor/clientportal.gw/.vertx/
+*.log
+vendor/

@@ -1,8 +1,7 @@
-# app.py (性能优化版)
+# app/main.py (最终版: 允许局域网访问，并手动打开浏览器)
 
 import requests
 import pandas as pd
-# --- 修改：增加 Response 用于处理 favicon ---
 from flask import Flask, render_template, jsonify, request as flask_request, redirect, url_for, Response
 import json
 import sys
@@ -10,20 +9,25 @@ import os
 import subprocess
 import time
 import platform
-from datetime import datetime, timedelta
-import webbrowser
-import threading
 import concurrent.futures
 
 # --- 应用程序配置 ---
 app = Flask(__name__)
-app.template_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+
+# 定义项目根目录, 以便正确找到 templates 和 vendor 文件夹
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 使用项目根目录来定位 templates 文件夹
+app.template_folder = os.path.join(PROJECT_ROOT, 'templates')
+
 BASE_URL = "https://localhost:5000/v1/api/"
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
 
-# --- 核心功能函数 (无改动) ---
+# --- 核心功能函数 ---
+
 def is_gateway_running():
+    """检查网关是否已连接并认证"""
     try:
         response = requests.get(f"{BASE_URL}iserver/auth/status", verify=False, timeout=2)
         return response.status_code == 200 and response.json().get('connected')
@@ -31,23 +35,30 @@ def is_gateway_running():
         return False
 
 def start_gateway():
+    """启动IBKR网关, 使用其内部的默认配置文件"""
     print(">>> 正在尝试自动启动 IBKR Gateway...")
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    gateway_path = os.path.join(project_root, 'clientportal.gw')
+    
+    gateway_path = os.path.join(PROJECT_ROOT, 'vendor', 'clientportal.gw')
+    
     if not os.path.isdir(gateway_path):
-        print(f"!!! 错误：在项目目录下未找到 'clientportal.gw' 文件夹: {gateway_path}")
+        print(f"!!! 错误：在项目目录下未找到 'vendor/clientportal.gw' 文件夹: {gateway_path}")
         return False
+
     if platform.system() == "Windows":
-        run_script, conf_file = os.path.join(gateway_path, 'bin', 'run.bat'), 'root\\conf.yaml'
+        run_script = os.path.join(gateway_path, 'bin', 'run.bat')
+        conf_file_argument = 'root\\conf.yaml'
         flags = subprocess.CREATE_NEW_CONSOLE
     else:
-        run_script, conf_file = os.path.join(gateway_path, 'bin', 'run.sh'), 'root/conf.yaml'
+        run_script = os.path.join(gateway_path, 'bin', 'run.sh')
+        conf_file_argument = 'root/conf.yaml'
         flags = 0
+
     if not os.path.exists(run_script):
         print(f"!!! 错误: 启动脚本未找到: {run_script}")
         return False
+        
     try:
-        subprocess.Popen([run_script, conf_file], cwd=gateway_path, creationflags=flags)
+        subprocess.Popen([run_script, conf_file_argument], cwd=gateway_path, creationflags=flags)
         print(">>> ✅ 网关启动命令已发送。请等待其初始化。")
         return True
     except Exception as e:
@@ -55,6 +66,7 @@ def start_gateway():
         return False
 
 def get_all_account_ids():
+    """获取所有账户ID"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/accounts", verify=False, timeout=5)
         if response.status_code == 200:
@@ -67,6 +79,7 @@ def get_all_account_ids():
         return None
 
 def get_account_summary(account_id):
+    """获取单个账户的摘要信息"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/{account_id}/summary", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else {}
@@ -74,6 +87,7 @@ def get_account_summary(account_id):
         return {}
         
 def get_account_positions(account_id):
+    """获取单个账户的持仓信息"""
     try:
         response = requests.get(f"{BASE_URL}portfolio/{account_id}/positions/0", verify=False, timeout=10)
         return response.json() if response.status_code == 200 else []
@@ -81,6 +95,7 @@ def get_account_positions(account_id):
         return []
 
 def get_price_snapshots(conids):
+    """批量获取合约的价格快照"""
     if not conids: return {}
     try:
         endpoint_url = f"{BASE_URL}md/snapshot"
@@ -93,6 +108,7 @@ def get_price_snapshots(conids):
         return {}
 
 def aggregate_portfolio_data(all_data):
+    """汇总所有账户的数据"""
     aggregated_summary = {
         'net_liquidation': 0, 'realized_pnl': 0, 'cash': 0,
         'buying_power': 0, 'currency': 'USD' 
@@ -131,8 +147,8 @@ def aggregate_portfolio_data(all_data):
         
     return {'summary': aggregated_summary, 'positions': final_positions}    
 
-# --- Flask 路由 ---
 def fetch_account_data(acc_id):
+    """获取并处理单个账户的摘要和持仓数据"""
     print(f"--> 开始获取账户 {acc_id} 的数据...")
     summary_raw = get_account_summary(acc_id)
     positions_raw = get_account_positions(acc_id)
@@ -161,14 +177,15 @@ def fetch_account_data(acc_id):
     print(f"<-- 完成获取账户 {acc_id} 的数据。")
     return acc_id, {'summary': summary_data, 'positions': processed_positions}
 
-# --- *** 新增路由：处理 favicon.ico 请求 *** ---
+# --- Flask 路由 ---
 @app.route('/favicon.ico')
 def favicon():
-    # 返回 204 No Content 响应，告诉浏览器这里没有图标，避免404错误
+    """处理浏览器对favicon.ico的请求，避免404错误"""
     return Response(status=204)
 
 @app.route('/')
 def home():
+    """主页，使用并发加载所有账户数据并展示"""
     print("\n--- 正在并行加载所有账户数据... ---")
     start_time = time.time()
     
@@ -199,6 +216,7 @@ def home():
 
 @app.route('/api/prices')
 def api_prices():
+    """提供给前端的API，用于动态获取价格"""
     conids_str = flask_request.args.get('conids', '')
     if not conids_str: 
         return jsonify({})
@@ -221,6 +239,7 @@ def api_prices():
 
 @app.route('/login')
 def login_page():
+    """登录页面，如果已认证则直接跳转主页"""
     print(">>> 正在检查网关认证状态...")
     if is_gateway_running():
         print(">>> ✅ 网关已认证，直接跳转至主仪表盘。")
@@ -231,15 +250,13 @@ def login_page():
 
 @app.route('/api/check_auth')
 def check_auth_status():
+    """提供给前端的API，用于轮询认证状态"""
     if is_gateway_running():
         return jsonify({'status': 'success'})
     else:
         return jsonify({'status': 'pending'})
 
 # --- 主程序入口 ---
-def open_browser():
-      webbrowser.open_new("http://127.0.0.1:8000/login")
-
 if __name__ == '__main__':
     print("="*40)
     print(" 启动 IBKR 实时报告应用 ".center(40, "="))
@@ -250,13 +267,14 @@ if __name__ == '__main__':
         print(">>> 等待网关初始化 (约10-15秒)...")
         time.sleep(10)
 
-    print("\n>>> ✅ Flask Web 服务器已启动。")
-    print(">>> ➡️  正在为您打开浏览器...")
-    
-    threading.Timer(1, open_browser).start()
+    print("\n>>> ✅ Flask Web 服务器已成功启动。")
+    print(">>> ➡️  请在浏览器中手动访问以下地址:")
+    print(">>>    - 本机访问: http://127.0.0.1:8000/login")
+    print(">>>    - 局域网访问: http://<您电脑的IP地址>:8000/login")
     
     try:
-        app.run(host='127.0.0.1', port=8000, debug=False)
+        # --- 主要改动在这里：将 host 设置为 '0.0.0.0' ---
+        app.run(host='0.0.0.0', port=8000, debug=False)
     except OSError as e:
         print(f"!!! 启动 Web 服务器失败: {e}")
         print("!!! 端口 8000 可能已被占用。")
